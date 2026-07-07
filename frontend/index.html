@@ -251,7 +251,45 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
   }
-  
+
+  /* ===== SECURITY SHIELD INDICATOR ===== */
+  .security-shield {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Share Tech Mono', monospace; font-size: 12px; letter-spacing: 1px;
+    padding: 5px 12px; border: 1px solid var(--border);
+    background: rgba(0, 255, 136, 0.06); color: var(--green);
+    transition: all 0.3s ease; cursor: default;
+  }
+  .security-shield i { font-size: 14px; }
+  /* SECURE (default = green, set above). WARNING = gold. LOCKDOWN/OFFLINE = red pulsing. */
+  .security-shield.warn { color: var(--gold); border-color: rgba(255,184,0,0.5); background: rgba(255,184,0,0.08); }
+  .security-shield.crit {
+    color: var(--red); border-color: rgba(255,59,59,0.7); background: rgba(255,59,59,0.12);
+    animation: shieldAlarm 1s ease-in-out infinite;
+  }
+  @keyframes shieldAlarm {
+    0%, 100% { box-shadow: 0 0 6px rgba(255,59,59,0.4); }
+    50% { box-shadow: 0 0 18px rgba(255,59,59,0.9); }
+  }
+
+  /* ===== LOCKDOWN OVERLAY (full-screen, shown while backend is sealed) ===== */
+  .lockdown-overlay {
+    position: fixed; inset: 0; z-index: 1200;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(3, 6, 16, 0.94); backdrop-filter: blur(8px);
+    text-align: center; padding: 24px;
+  }
+  .lockdown-overlay[hidden] { display: none; }
+  .lockdown-icon { font-size: 84px; color: var(--red); margin-bottom: 22px; animation: shieldAlarm 1s ease-in-out infinite; }
+  .lockdown-title {
+    font-family: 'Orbitron', sans-serif; font-size: 30px; font-weight: 900;
+    color: var(--red); letter-spacing: 4px; margin-bottom: 14px;
+    text-shadow: 0 0 24px rgba(255,59,59,0.6);
+  }
+  .lockdown-msg { font-family: 'Rajdhani', sans-serif; font-size: 17px; color: var(--text); max-width: 560px; line-height: 1.6; margin-bottom: 20px; }
+  .lockdown-timer { font-family: 'Share Tech Mono', monospace; font-size: 15px; color: var(--gold); letter-spacing: 2px; }
+  .lockdown-reason { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); margin-top: 18px; }
+
   .hud-time {
     font-family: 'Orbitron', sans-serif;
     font-size: 20px;
@@ -1020,7 +1058,10 @@
   .admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .admin-btn.primary { background: rgba(0, 255, 136, 0.12); border-color: rgba(0, 255, 136, 0.4); color: var(--green); }
   .admin-btn.primary:hover { background: rgba(0, 255, 136, 0.25); }
+  .admin-btn.danger { background: rgba(255, 59, 59, 0.12); border-color: rgba(255, 59, 59, 0.45); color: var(--red); }
+  .admin-btn.danger:hover { background: rgba(255, 59, 59, 0.25); }
   .admin-btn.wide { width: 100%; text-align: center; margin-top: 4px; }
+  .admin-sec-event { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-dim); padding: 4px 8px; border-left: 2px solid var(--red); background: rgba(255,59,59,0.05); }
   .admin-fact-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; }
   .admin-fact-list::-webkit-scrollbar { width: 4px; }
   .admin-fact-list::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
@@ -1090,9 +1131,9 @@
       </div>
     </div>
     <div class="hud-section">
-      <div class="hud-status">
-        <i class="fas fa-satellite-dish" style="color:var(--cyan)"></i>
-        <span>UPLINK: SYSNECT · IT OPERATIONS</span>
+      <div class="security-shield" id="security-shield" title="สถานะความปลอดภัยระบบ">
+        <i class="fas fa-shield-halved" id="security-shield-icon"></i>
+        <span id="security-shield-text">SECURITY</span>
       </div>
     </div>
     <div class="hud-section">
@@ -1301,6 +1342,21 @@
       </div>
     </div>
 
+    <!-- Security monitor -->
+    <div class="admin-section">
+      <div class="admin-section-title">ความปลอดภัย (SECURITY) <span id="ap-sec-state" class="admin-badge">--</span></div>
+      <div class="admin-stat-grid">
+        <div class="admin-stat"><span class="admin-stat-k">THREAT SCORE</span><span class="admin-stat-v" id="ap-sec-score">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">WINDOW</span><span class="admin-stat-v" id="ap-sec-window">--</span></div>
+      </div>
+      <div class="admin-fact-list" id="ap-sec-events">
+        <div class="admin-empty">ไม่มีเหตุการณ์ผิดปกติ</div>
+      </div>
+      <button class="admin-btn wide danger" id="ap-panic-btn"><i class="fas fa-lock"></i> ล็อกดาวน์ระบบทันที (Panic Button)</button>
+      <button class="admin-btn wide" id="ap-sec-clear-btn"><i class="fas fa-unlock"></i> ยกเลิกล็อกดาวน์ / รีเซ็ตประวัติ</button>
+      <div class="admin-note" id="ap-sec-note"></div>
+    </div>
+
     <!-- Knowledge management -->
     <div class="admin-section">
       <div class="admin-section-title">ความรู้ที่สอน (KNOWLEDGE) <span id="ap-fact-count" class="admin-badge">0</span></div>
@@ -1326,6 +1382,18 @@
 
     <div class="admin-toast" id="admin-toast" hidden></div>
   </aside>
+</div>
+
+<!-- LOCKDOWN OVERLAY (shown when the backend seals itself after a detected threat) -->
+<div id="lockdown-overlay" class="lockdown-overlay" hidden>
+  <div class="lockdown-icon"><i class="fas fa-shield-halved"></i></div>
+  <div class="lockdown-title">SECURITY LOCKDOWN</div>
+  <div class="lockdown-msg" id="lockdown-msg">
+    ตรวจพบภัยคุกคามด้านความปลอดภัย ระบบได้ปิดการทำงานหลังบ้านชั่วคราวเพื่อป้องกันข้อมูลครับ<br>
+    กรุณารอจนกว่าระบบจะกลับมาออนไลน์อีกครั้ง
+  </div>
+  <div class="lockdown-timer" id="lockdown-timer"></div>
+  <div class="lockdown-reason" id="lockdown-reason"></div>
 </div>
 
 <script>
@@ -1559,11 +1627,68 @@ async function fetchSystemLog() {
   }
 }
 
+// ===== SECURITY SHIELD (continuous posture monitoring + lockdown handling) =====
+let securityState = 'SECURE';
+function applySecurityState(state, sec) {
+  securityState = state;
+  const shield = document.getElementById('security-shield');
+  const icon = document.getElementById('security-shield-icon');
+  const text = document.getElementById('security-shield-text');
+  const overlay = document.getElementById('lockdown-overlay');
+  if (!shield) return;
+
+  shield.classList.remove('warn', 'crit');
+  if (state === 'SECURE') {
+    icon.className = 'fas fa-shield-halved'; text.textContent = 'SECURE';
+  } else if (state === 'WARNING') {
+    shield.classList.add('warn'); icon.className = 'fas fa-shield-halved'; text.textContent = 'WARNING';
+  } else if (state === 'LOCKDOWN') {
+    shield.classList.add('crit'); icon.className = 'fas fa-lock'; text.textContent = 'LOCKDOWN';
+  } else { // OFFLINE
+    shield.classList.add('crit'); icon.className = 'fas fa-shield-halved'; text.textContent = 'OFFLINE';
+  }
+
+  // Full-screen lockdown / offline overlay
+  if (state === 'LOCKDOWN' || state === 'OFFLINE') {
+    overlay.hidden = false;
+    const msg = document.getElementById('lockdown-msg');
+    const timer = document.getElementById('lockdown-timer');
+    const reason = document.getElementById('lockdown-reason');
+    if (state === 'OFFLINE') {
+      document.querySelector('.lockdown-title').textContent = 'BACKEND OFFLINE';
+      msg.innerHTML = 'ไม่สามารถเชื่อมต่อระบบหลังบ้านได้ครับ<br>กำลังพยายามเชื่อมต่อใหม่อัตโนมัติ กรุณารอสักครู่...';
+      timer.textContent = '⏳ กำลังเชื่อมต่อใหม่...';
+      reason.textContent = '';
+    } else {
+      document.querySelector('.lockdown-title').textContent = 'SECURITY LOCKDOWN';
+      msg.innerHTML = 'ตรวจพบภัยคุกคามด้านความปลอดภัย ระบบได้ปิดการทำงานหลังบ้านชั่วคราวเพื่อป้องกันข้อมูลครับ<br>กรุณารอจนกว่าระบบจะกลับมาออนไลน์อีกครั้ง';
+      const remain = sec && sec.seconds_remaining ? sec.seconds_remaining : 0;
+      timer.textContent = remain > 0 ? `🛡️ ระบบจะกลับมาออนไลน์ในอีก ${remain} วินาที` : '🛡️ กำลังตรวจสอบความปลอดภัย...';
+      reason.textContent = sec && sec.last_reason ? ('สาเหตุ: ' + sec.last_reason) : '';
+    }
+  } else {
+    overlay.hidden = true;
+  }
+}
+
+async function fetchSecurityStatus() {
+  try {
+    const res = await fetch(API_BASE + '/api/security/status');
+    if (!res.ok) throw new Error('status ' + res.status);
+    const sec = await res.json();
+    applySecurityState(sec.state || 'SECURE', sec);
+  } catch (err) {
+    // Backend unreachable = treat as OFFLINE (defensive: assume sealed/down)
+    applySecurityState('OFFLINE', null);
+  }
+}
+
 // Fetch stats every 3 seconds; AI engine info every 30 seconds; sensors/log every 5 seconds
 setInterval(fetchSystemStatus, 3000);
 setInterval(fetchHealth, 30000);
 setInterval(fetchSensors, 5000);
 setInterval(fetchSystemLog, 5000);
+setInterval(fetchSecurityStatus, 3000);  // security posture polled every 3s
 
 // ===== SESSION ID (isolates conversation memory per client) =====
 let sessionId = localStorage.getItem('jarvis_session_id');
@@ -2046,6 +2171,53 @@ async function loadAdminData() {
   } catch (e) { /* offline */ }
   await loadLearnedFacts();
   await loadTrainingStatus();
+  await loadSecurityPanel();
+}
+
+async function loadSecurityPanel() {
+  const stateBadge = document.getElementById('ap-sec-state');
+  const eventsEl = document.getElementById('ap-sec-events');
+  try {
+    const sec = await apiJSON('/api/security/status');
+    stateBadge.textContent = sec.state || '--';
+    stateBadge.style.color = sec.state === 'LOCKDOWN' ? 'var(--red)' : (sec.state === 'WARNING' ? 'var(--gold)' : 'var(--cyan-bright)');
+    document.getElementById('ap-sec-score').textContent = `${sec.score} / ${sec.lockdown_threshold}`;
+    document.getElementById('ap-sec-window').textContent = sec.window_seconds + ' วิ';
+    const events = sec.recent_events || [];
+    if (!events.length) {
+      eventsEl.innerHTML = '<div class="admin-empty">ไม่มีเหตุการณ์ผิดปกติ</div>';
+    } else {
+      eventsEl.innerHTML = events.slice().reverse().map(e =>
+        `<div class="admin-sec-event">[${e.ago}s ago] ${escapeHtml(e.kind)} (sev ${e.severity}) — ip ${escapeHtml(e.ip)}</div>`
+      ).join('');
+    }
+  } catch (e) {
+    stateBadge.textContent = 'OFFLINE';
+    eventsEl.innerHTML = '<div class="admin-empty">เชื่อมต่อเซิร์ฟเวอร์ไม่ได้</div>';
+  }
+}
+
+async function panicLockdown() {
+  if (!window.confirm('ยืนยันล็อกดาวน์ระบบหลังบ้านทันทีใช่ไหมครับ? (ผู้ใช้ทุกคนจะถูกปฏิเสธการเข้าถึงชั่วคราว)')) return;
+  try {
+    const d = await apiJSON('/api/security/lockdown', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    if (d.status === 'ok') { adminToast('🛑 ล็อกดาวน์ระบบแล้ว'); await loadSecurityPanel(); }
+    else adminToast(d.message || 'สั่งล็อกดาวน์ไม่สำเร็จ', true);
+  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
+}
+
+async function clearSecurityLockdown() {
+  try {
+    const d = await apiJSON('/api/security/clear', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    if (d.status === 'ok') { adminToast('✅ ยกเลิกล็อกดาวน์แล้ว'); await loadSecurityPanel(); }
+    else adminToast(d.message || 'ยกเลิกไม่สำเร็จ', true);
+  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
 }
 
 async function loadLearnedFacts() {
@@ -2146,6 +2318,8 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !adminOv
 document.getElementById('ap-teach-btn').addEventListener('click', teachFactUI);
 document.getElementById('ap-teach-input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) teachFactUI(); });
 document.getElementById('ap-build-btn').addEventListener('click', buildDatasetUI);
+document.getElementById('ap-panic-btn').addEventListener('click', panicLockdown);
+document.getElementById('ap-sec-clear-btn').addEventListener('click', clearSecurityLockdown);
 async function submitAuth() {
   authErrorEl.textContent = '';
   try {
@@ -2389,6 +2563,7 @@ async function initJarvis() {
   fetchHealth();
   fetchSensors();
   fetchSystemLog();
+  fetchSecurityStatus();
   await fetchAuthStatus();
   loadChatHistory();
 

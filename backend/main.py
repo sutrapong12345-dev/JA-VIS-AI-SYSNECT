@@ -382,6 +382,99 @@ chat_rate_limiter = RateLimiter(max_attempts=30, window_seconds=60)    # 30 msgs
 
 
 # --------------------------------------------------------------------------- #
+#  Security monitor + automatic lockdown
+#  Continuously scores threat signals (failed logins, rate-limit trips, blocked
+#  injection/command attempts...). If the score crosses a threshold, the backend
+#  enters LOCKDOWN: every sensitive endpoint stops serving requests and returns a
+#  503 until the cooldown passes (or an already-authenticated admin clears it).
+#  The status endpoint stays alive throughout so the frontend can show the shield.
+# --------------------------------------------------------------------------- #
+class SecurityMonitor:
+    # severity weight per threat kind (higher = stronger "someone's attacking" signal)
+    _SEVERITY = {
+        "failed_login": 3,
+        "rate_limit": 3,
+        "nonadmin_command": 6,   # a [CMD:] tag from a non-admin = likely prompt injection
+        "nonadmin_sysnect": 5,   # attempt to read local source without auth
+        "path_traversal": 6,     # crafted session_id trying to escape the logs dir
+        "oversized_request": 2,
+    }
+
+    def __init__(self):
+        self._warn = int(os.getenv("SEC_WARN_THRESHOLD", "5"))
+        self._lockdown = int(os.getenv("SEC_LOCKDOWN_THRESHOLD", "10"))
+        self._window = int(os.getenv("SEC_WINDOW_SECONDS", "120"))
+        self._cooldown = int(os.getenv("SEC_LOCKDOWN_SECONDS", "60"))
+        self._events: deque = deque(maxlen=200)   # (ts, kind, severity, ip, detail)
+        self._lock = threading.Lock()
+        self._lockdown_until = 0.0
+        self._last_reason = ""
+
+    def _score_locked(self) -> int:
+        cutoff = time.time() - self._window
+        return sum(sev for (ts, _k, sev, _ip, _d) in self._events if ts >= cutoff)
+
+    def record(self, kind: str, ip: str = "unknown", detail: str = "") -> None:
+        sev = self._SEVERITY.get(kind, 1)
+        with self._lock:
+            self._events.append((time.time(), kind, sev, ip, detail[:120]))
+            score = self._score_locked()
+            log.warning("SECURITY event '%s' (sev %d, ip=%s) score=%d/%d", kind, sev, ip, score, self._lockdown)
+            if score >= self._lockdown and time.time() >= self._lockdown_until:
+                self._lockdown_until = time.time() + self._cooldown
+                self._last_reason = f"{kind} (score {score})"
+                log.critical("🛑 SECURITY LOCKDOWN ENGAGED (%s) — backend sealed for %ds", self._last_reason, self._cooldown)
+
+    def is_locked_down(self) -> bool:
+        with self._lock:
+            return time.time() < self._lockdown_until
+
+    def engage_manual(self, reason: str = "manual") -> None:
+        with self._lock:
+            self._lockdown_until = time.time() + self._cooldown
+            self._last_reason = reason
+            log.critical("🛑 SECURITY LOCKDOWN engaged manually (%s)", reason)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._lockdown_until = 0.0
+            self._events.clear()
+            log.warning("Security lockdown cleared manually; threat history reset")
+
+    def status(self) -> Dict[str, object]:
+        with self._lock:
+            now = time.time()
+            score = self._score_locked()
+            locked = now < self._lockdown_until
+            if locked:
+                state = "LOCKDOWN"
+            elif score >= self._warn:
+                state = "WARNING"
+            else:
+                state = "SECURE"
+            cutoff = now - self._window
+            recent = [
+                {"kind": k, "severity": sev, "ip": ip, "detail": d,
+                 "ago": int(now - ts)}
+                for (ts, k, sev, ip, d) in self._events if ts >= cutoff
+            ]
+            return {
+                "state": state,
+                "score": score,
+                "warn_threshold": self._warn,
+                "lockdown_threshold": self._lockdown,
+                "locked_down": locked,
+                "seconds_remaining": max(0, int(self._lockdown_until - now)) if locked else 0,
+                "last_reason": self._last_reason,
+                "recent_events": recent[-10:],
+                "window_seconds": self._window,
+            }
+
+
+security_monitor = SecurityMonitor()
+
+
+# --------------------------------------------------------------------------- #
 #  Company knowledge base
 # --------------------------------------------------------------------------- #
 class KnowledgeBase:
@@ -862,6 +955,7 @@ class CommandAgent:
             # and return only the authoritative lock message. The command never runs.
             log.warning("Blocked %d command(s) from a NON-ADMIN session %s... (possible injection): %r",
                         len(commands), session_id[:8], commands[:3])
+            security_monitor.record("nonadmin_command", detail=str(commands[:2]))
             return "🚫 ระบบปฏิบัติการถูกล็อก! ไม่สามารถเข้าถึงหรือรันคำสั่งหลังบ้านได้ กรุณาใช้คำสั่งยืนยันตัวตน (Authentication) ก่อนครับบอส"
 
         if not self.enabled:
@@ -1460,19 +1554,38 @@ if settings.cors_origins == ["*"]:
 MAX_REQUEST_BYTES = int(os.getenv("MAX_REQUEST_BYTES", str(25 * 1024 * 1024)))  # 25 MB
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "8000"))  # cap chat message length (cost/abuse guard)
 
+# During a lockdown, EVERY /api path is sealed EXCEPT these — so the frontend can
+# still read the security state + an already-authenticated admin can lift it.
+_LOCKDOWN_ALLOWED_PATHS = {
+    "/api/health", "/api/security/status", "/api/security/clear", "/api/security/lockdown",
+}
+
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
+    from starlette.responses import JSONResponse
+    path = request.url.path
+
     # Body-size guard via Content-Length (cheap, before we read anything).
     cl = request.headers.get("content-length")
     if cl:
         try:
             if int(cl) > MAX_REQUEST_BYTES:
-                from starlette.responses import JSONResponse
                 log.warning("Rejected oversized request (%s bytes) from ip=%s", cl, client_ip(request))
+                security_monitor.record("oversized_request", client_ip(request))
                 return JSONResponse(status_code=413, content={"status": "error", "message": "คำขอมีขนาดใหญ่เกินไปครับ"})
         except ValueError:
             pass
+
+    # LOCKDOWN gate: if the backend has sealed itself, refuse every sensitive
+    # endpoint until the cooldown passes (or an admin clears it).
+    if path.startswith("/api/") and path not in _LOCKDOWN_ALLOWED_PATHS and security_monitor.is_locked_down():
+        st = security_monitor.status()
+        return JSONResponse(status_code=503, content={
+            "status": "locked",
+            "message": "🛡️ ระบบตรวจพบภัยคุกคามด้านความปลอดภัย — ปิดระบบหลังบ้านชั่วคราวเพื่อป้องกันข้อมูล กรุณารอสักครู่ครับ",
+            "security": st,
+        })
 
     response = await call_next(request)
 
@@ -1539,6 +1652,36 @@ def get_system_log():
     """Most-recent-first feed of real backend log lines (admin logins, commands
     run, knowledge reloads...) for the frontend's SYSTEM LOG panel."""
     return {"entries": list(_log_buffer)[::-1][:20]}
+
+
+class SecurityRequest(BaseModel):
+    session_id: str = "default"
+
+
+@app.get("/api/security/status")
+def security_status():
+    """Live security posture for the frontend shield indicator. Always reachable,
+    even during lockdown, so the UI can show the state and poll for recovery."""
+    return security_monitor.status()
+
+
+@app.post("/api/security/clear")
+def security_clear(request: SecurityRequest):
+    """Lift an active lockdown early. Only an already-authenticated admin session
+    (from before the lockdown) can do this; new logins are blocked while locked."""
+    if not store.is_admin(request.session_id or "default"):
+        return {"status": "error", "message": "🚫 ต้องเป็นแอดมินที่ยืนยันตัวตนแล้วเท่านั้นครับ"}
+    security_monitor.clear()
+    return {"status": "ok", "message": "✅ ยกเลิกการล็อกดาวน์และรีเซ็ตประวัติภัยคุกคามแล้วครับ", **security_monitor.status()}
+
+
+@app.post("/api/security/lockdown")
+def security_lockdown(request: SecurityRequest):
+    """Admin can manually seal the backend (panic button)."""
+    if not store.is_admin(request.session_id or "default"):
+        return {"status": "error", "message": "🚫 ต้องเป็นแอดมินที่ยืนยันตัวตนแล้วเท่านั้นครับ"}
+    security_monitor.engage_manual("admin panic button")
+    return {"status": "ok", "message": "🛑 สั่งล็อกดาวน์ระบบหลังบ้านแล้วครับ", **security_monitor.status()}
 
 
 @app.get("/api/knowledge")
@@ -1707,6 +1850,7 @@ def auth_login(request: LoginRequest, http_request: Request):
     if not login_rate_limiter.check(ip):
         wait = login_rate_limiter.retry_after(ip)
         log.warning("Login rate-limited (ip=%s, retry in %ds)", ip, wait)
+        security_monitor.record("rate_limit", ip, "login")
         return {"status": "error", "message": f"พยายามเข้าสู่ระบบบ่อยเกินไปครับ กรุณารออีก {wait} วินาทีแล้วลองใหม่"}
     if not settings.admin_password:
         return {"status": "error", "message": "ยังไม่ได้ตั้งค่า ADMIN_PASSWORD ใน backend/.env ครับ"}
@@ -1721,6 +1865,7 @@ def auth_login(request: LoginRequest, http_request: Request):
     )
     if not (user_ok and pass_ok):
         log.warning("Failed admin login attempt (session %s..., ip=%s)", session_id[:8], ip)
+        security_monitor.record("failed_login", ip)
         return {"status": "error", "message": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้องครับ"}
     store.set_admin(session_id, True)
     log.info("Admin login success (session %s...)", session_id[:8])
@@ -1899,9 +2044,12 @@ def chat_with_jarvis(request: ChatRequest, http_request: Request):
     user_msg = (request.message or "")[:MAX_MESSAGE_CHARS]
 
     ip = client_ip(http_request)
+    if any(bad in (request.session_id or "") for bad in ("..", "/", "\\", "\x00")):
+        security_monitor.record("path_traversal", ip, request.session_id[:40])
     if not chat_rate_limiter.check(ip):
         wait = chat_rate_limiter.retry_after(ip)
         log.warning("Chat rate-limited (ip=%s, retry in %ds)", ip, wait)
+        security_monitor.record("rate_limit", ip, "chat")
         return {"reply": f"ส่งข้อความถี่เกินไปครับ กรุณารออีก {wait} วินาทีแล้วลองใหม่ครับ", "provider": settings.active_ai}
 
     # Resolve dynamic AI provider if AUTO routing is selected
@@ -2002,6 +2150,7 @@ def chat_with_jarvis(request: ChatRequest, http_request: Request):
     sysnect_match = re.search(r"\[SYSNECT_DATA:\s*(.*?)\]", reply, re.IGNORECASE)
     if sysnect_match and not is_admin:
         log.warning("Blocked SYSNECT_DATA search from a NON-ADMIN session %s... (possible injection)", session_id[:8])
+        security_monitor.record("nonadmin_sysnect", ip)
         reply = re.sub(r"\[SYSNECT_DATA:\s*.*?\]", "", reply, flags=re.IGNORECASE).strip()
     elif sysnect_match:
         query = sysnect_match.group(1).strip()
@@ -2040,6 +2189,7 @@ def chat_stream(request: ChatRequest, http_request: Request):
     if not chat_rate_limiter.check(ip):
         wait = chat_rate_limiter.retry_after(ip)
         log.warning("Chat stream rate-limited (ip=%s, retry in %ds)", ip, wait)
+        security_monitor.record("rate_limit", ip, "chat_stream")
 
         def limited():
             yield sse({"done": True, "reply": f"ส่งข้อความถี่เกินไปครับ กรุณารออีก {wait} วินาทีแล้วลองใหม่ครับ", "provider": settings.active_ai})
@@ -2113,6 +2263,7 @@ def chat_stream(request: ChatRequest, http_request: Request):
         sysnect_match = re.search(r"\[SYSNECT_DATA:\s*(.*?)\]", reply, re.IGNORECASE)
         if sysnect_match and not is_admin:
             log.warning("Blocked SYSNECT_DATA search from a NON-ADMIN session %s... (stream, possible injection)", session_id[:8])
+            security_monitor.record("nonadmin_sysnect", ip)
             reply = re.sub(r"\[SYSNECT_DATA:\s*.*?\]", "", reply, flags=re.IGNORECASE).strip()
         elif sysnect_match:
             query = sysnect_match.group(1).strip()
