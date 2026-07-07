@@ -1512,15 +1512,35 @@ def switch_active_model(raw_name: str) -> str:
 _FALLBACK_CHAIN = ["gemini", "groq", "ollama"]
 
 
+# Gemini's free-tier requests/day cap varies WILDLY by model — verified live
+# 2026-07-08: gemini-2.5-flash is only 20/day (exhausts almost immediately),
+# while gemini-2.5-flash-lite is ~1,000-1,500/day. So the cap shown on the
+# panel must be derived from the ACTUAL configured model, not hardcoded.
+_GEMINI_MODEL_RPD = {
+    "gemini-2.5-flash": 20,
+    "gemini-2.5-pro": 20,
+    "gemini-2.0-flash": 200,
+    "gemini-2.0-flash-lite": 200,
+    "gemini-2.5-flash-lite": 1000,
+    "gemini-flash-latest": 1000,
+    "gemini-flash-lite-latest": 1000,
+}
+
+
+def _gemini_daily_cap() -> int:
+    return _GEMINI_MODEL_RPD.get((settings.gemini_model or "").strip().lower(), 1000)
+
+
 # Per-provider token/request counters for the frontend's TOKEN STATUS panel.
 # Resets at the local calendar date rollover since that's how each vendor's
 # free-tier daily cap resets. Only the metric each vendor actually enforces a
 # daily cap on is used for the percent bar (Groq: tokens/day, Gemini:
 # requests/day) — Claude (pay-per-use) and Ollama (local) have no daily cap,
-# so they're tracked for visibility only.
+# so they're tracked for visibility only. Gemini's cap is resolved live from
+# the configured model (see get_token_status) rather than stored here.
 _DAILY_CAPS = {
     "claude": {"metric": None, "cap": None},
-    "gemini": {"metric": "requests", "cap": 1500},
+    "gemini": {"metric": "requests", "cap": None},
     "groq": {"metric": "tokens", "cap": 100_000},
     "ollama": {"metric": None, "cap": None},
 }
@@ -1551,6 +1571,8 @@ def get_token_status() -> Dict[str, Any]:
         used = entry["tokens"] if entry["date"] == today else 0
         reqs = entry["requests"] if entry["date"] == today else 0
         metric, cap = cap_info["metric"], cap_info["cap"]
+        if name == "gemini":
+            cap = _gemini_daily_cap()  # resolved live from the configured model
         percent = None
         # Reported uncapped (can exceed 100 — e.g. Groq counts tokens from
         # responses that already landed before the daily cap kicked in), so
@@ -1562,6 +1584,7 @@ def get_token_status() -> Dict[str, Any]:
             percent = round(reqs / cap * 100, 1)
         providers[name] = {
             "configured": _provider_configured(name),
+            "model": _provider_model_label(name),
             "tokens_today": used,
             "requests_today": reqs,
             "cap_metric": metric,

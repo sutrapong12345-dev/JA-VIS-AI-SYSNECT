@@ -1750,18 +1750,19 @@ async function fetchTokenStatus() {
     const html = order.filter(name => providers[name]).map(name => {
       const p = providers[name];
       const label = TOKEN_STATUS_LABELS[name] || name.toUpperCase();
+      const modelTag = p.model ? `<span class="text-jvdim text-[8px] ml-1">${p.model}</span>` : '';
       if (!p.configured) {
         return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">ไม่ได้ตั้งค่า</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
       }
       if (p.percent === null || p.percent === undefined) {
         const note = name === 'ollama' ? 'ไม่จำกัด (ในเครื่อง)' : 'ไม่มีลิมิตรายวัน';
-        return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">${p.tokens_today.toLocaleString()} token · ${note}</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
+        return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}${modelTag}</span><span class="metric-value">${p.tokens_today.toLocaleString()} token · ${note}</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
       }
       const unit = p.cap_metric === 'requests' ? 'คำขอ' : 'token';
       const used = p.cap_metric === 'requests' ? p.requests_today : p.tokens_today;
       const barColor = p.percent >= 90 ? 'background:#ff4d4d;' : (p.percent >= 70 ? 'background:#ffb020;' : '');
       const percentLabel = p.percent > 100 ? `เกินโควต้า (${p.percent}%)` : `${p.percent}%`;
-      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${percentLabel})</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
+      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}${modelTag}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${percentLabel})</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
     }).join('');
     document.getElementById('token-status-list').innerHTML = html || '<div class="log-empty">ไม่มีข้อมูล</div>';
   } catch (err) {
