@@ -749,7 +749,18 @@
     font-weight: 700;
   }
   @keyframes jvBlink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
-  
+  .stopped-tag {
+    display: inline-block;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--red, #ff4d4d);
+    border: 1px solid rgba(255, 77, 77, 0.4);
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+
   /* Input area */
   .input-area {
     width: 100%;
@@ -2119,6 +2130,7 @@ function enterChatMode() {
 }
 
 let isProcessing = false; // block overlapping sends (they corrupt the stream/history)
+let currentAbortController = null; // lets the Stop button cancel an in-flight streaming reply
 
 async function processInput(input, options = {}) {
   const viaVoice = !!options.viaVoice;
@@ -2138,7 +2150,9 @@ async function processInput(input, options = {}) {
   }
 
   isProcessing = true;
-  sendBtn.style.opacity = '0.5';
+  currentAbortController = new AbortController();
+  sendBtn.innerHTML = '<i class="fas fa-stop"></i>';
+  sendBtn.title = 'หยุดการตอบกลับ';
 
   // Voice conversation stays on the main dashboard (no docking to chat-active) —
   // the messages still land in the (smaller) chat-log below the reactor.
@@ -2172,7 +2186,8 @@ async function processInput(input, options = {}) {
     const resp = await fetch(API_BASE + '/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId })
+      body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId }),
+      signal: currentAbortController.signal
     });
     if (!resp.ok || !resp.body) throw new Error('stream unavailable');
 
@@ -2212,7 +2227,20 @@ async function processInput(input, options = {}) {
     speakText(text, continueVoiceLoop);
     statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
   } catch (err) {
+    if (err.name === 'AbortError') {
+      // User pressed Stop — freeze whatever text already arrived, don't retry
+      // or fall back (that would just start a fresh answer right after stopping one).
+      // Resetting isProcessing/the button icon is handled by the finally block below.
+      window.speechSynthesis.cancel();
+      el.innerHTML = (acc ? renderMarkdown(acc) : '<span class="text-jvdim">(ไม่มีข้อความ — หยุดก่อนที่ AI จะเริ่มตอบ)</span>') +
+        ' <span class="stopped-tag">[หยุดแล้ว]</span>';
+      scrollChat(false);
+      statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+      return;
+    }
     console.error('stream failed, falling back:', err);
+    // Non-abort failures (network drop, backend error) still get the old
+    // "retry via non-streaming endpoint" behavior below.
     // Fallback to the non-streaming endpoint
     try {
       const r = await fetch(API_BASE + '/api/chat', {
@@ -2236,11 +2264,20 @@ async function processInput(input, options = {}) {
     }
   } finally {
     isProcessing = false;
+    currentAbortController = null;
+    sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+    sendBtn.title = 'ส่งข้อความ';
     sendBtn.style.opacity = '';
   }
 }
 
-sendBtn.addEventListener('click', () => processInput(userInput.value));
+sendBtn.addEventListener('click', () => {
+  if (isProcessing) {
+    if (currentAbortController) currentAbortController.abort();
+  } else {
+    processInput(userInput.value);
+  }
+});
 // keydown + isComposing: Enter mid-Thai-IME composition must not fire a send
 userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) processInput(userInput.value);
