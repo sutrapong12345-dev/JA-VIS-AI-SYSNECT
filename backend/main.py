@@ -33,8 +33,8 @@ import time
 import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
 import psutil
 import uvicorn
@@ -791,6 +791,17 @@ class SystemMonitor:
         except Exception:
             pass
 
+        # Fallback for Windows using WMI query
+        if IS_WINDOWS and cpu_temp is None:
+            try:
+                cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", 
+                       "Get-CimInstance -Namespace root\\wmi -ClassName MSAcpi_ThermalZoneTemperature | Select-Object -ExpandProperty CurrentTemperature"]
+                output = subprocess.check_output(cmd, text=True, timeout=2, creationflags=_NO_WINDOW)
+                val = int(output.strip().split("\n")[0])
+                cpu_temp = round((val / 10.0) - 273.15, 1)
+            except Exception:
+                pass
+
         try:
             disk_percent = psutil.disk_usage(os.path.abspath(os.sep)).percent
         except Exception:
@@ -1339,6 +1350,8 @@ def _chat_anthropic(system: str, history: List[Dict[str, str]]) -> str:
         log.error("Anthropic API error: %s", exc)
         return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Claude ครับท่าน: {exc}"
 
+    if getattr(message, "usage", None):
+        _record_usage("claude", message.usage.input_tokens + message.usage.output_tokens)
     return "".join(block.text for block in message.content if block.type == "text")
 
 
@@ -1361,6 +1374,11 @@ def _chat_gemini(system: str, history: List[Dict[str, str]]) -> str:
     try:
         chat = model.start_chat(history=gemini_history)
         response = chat.send_message(latest)
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            _record_usage("gemini", getattr(usage, "total_token_count", 0))
+        else:
+            _record_usage("gemini", 0)
         return response.text
     except Exception as exc:  # google SDK raises a variety of exception types
         log.error("Gemini error: %s", exc)
@@ -1378,6 +1396,8 @@ def _chat_ollama(system: str, history: List[Dict[str, str]]) -> str:
             messages=messages,
             max_tokens=settings.max_tokens,
         )
+        if getattr(response, "usage", None):
+            _record_usage("ollama", response.usage.total_tokens)
         return response.choices[0].message.content
     except Exception as exc:
         log.error("Ollama error: %s", exc)
@@ -1398,6 +1418,8 @@ def _chat_groq(system: str, history: List[Dict[str, str]]) -> str:
             messages=messages,
             max_tokens=settings.max_tokens,
         )
+        if getattr(response, "usage", None):
+            _record_usage("groq", response.usage.total_tokens)
         return response.choices[0].message.content
     except Exception as exc:
         log.error("Groq error: %s", exc)
@@ -1474,20 +1496,109 @@ def switch_active_model(raw_name: str) -> str:
     return f"🔄 **เปลี่ยนโมเดลสำเร็จครับ!** ตอนนี้ใช้ **{name.upper()}** ({_provider_model_label(name)}) เป็นสมองกลหลักแล้วครับ"
 
 
+# Free-tier quotas (esp. Groq: 100K tokens/day on llama-3.3-70b) can run out
+# well before the workday ends once the system prompt + knowledge base are
+# resent on every message. Rather than hard-erroring for everyone once the
+# active provider is exhausted, fall through to the next configured provider
+# — ollama is always last since it's local/unlimited (lower quality, but never
+# fully down). Only triggers on quota/rate-limit errors, never on real bugs.
+_FALLBACK_CHAIN = ["gemini", "groq", "ollama"]
+
+
+# Per-provider token/request counters for the frontend's TOKEN STATUS panel.
+# Resets at the local calendar date rollover since that's how each vendor's
+# free-tier daily cap resets. Only the metric each vendor actually enforces a
+# daily cap on is used for the percent bar (Groq: tokens/day, Gemini:
+# requests/day) — Claude (pay-per-use) and Ollama (local) have no daily cap,
+# so they're tracked for visibility only.
+_DAILY_CAPS = {
+    "claude": {"metric": None, "cap": None},
+    "gemini": {"metric": "requests", "cap": 1500},
+    "groq": {"metric": "tokens", "cap": 100_000},
+    "ollama": {"metric": None, "cap": None},
+}
+_TOKEN_USAGE: Dict[str, Dict[str, Any]] = {
+    name: {"tokens": 0, "requests": 0, "date": date.today().isoformat()}
+    for name in _DAILY_CAPS
+}
+
+
+def _record_usage(provider: str, tokens: int) -> None:
+    entry = _TOKEN_USAGE.get(provider)
+    if entry is None:
+        return
+    today = date.today().isoformat()
+    if entry["date"] != today:
+        entry["tokens"] = 0
+        entry["requests"] = 0
+        entry["date"] = today
+    entry["tokens"] += max(tokens, 0)
+    entry["requests"] += 1
+
+
+def get_token_status() -> Dict[str, Any]:
+    today = date.today().isoformat()
+    providers = {}
+    for name, cap_info in _DAILY_CAPS.items():
+        entry = _TOKEN_USAGE.get(name, {"tokens": 0, "requests": 0, "date": today})
+        used = entry["tokens"] if entry["date"] == today else 0
+        reqs = entry["requests"] if entry["date"] == today else 0
+        metric, cap = cap_info["metric"], cap_info["cap"]
+        percent = None
+        if metric == "tokens" and cap:
+            percent = round(min(used, cap) / cap * 100, 1)
+        elif metric == "requests" and cap:
+            percent = round(min(reqs, cap) / cap * 100, 1)
+        providers[name] = {
+            "configured": _provider_configured(name),
+            "tokens_today": used,
+            "requests_today": reqs,
+            "cap_metric": metric,
+            "cap": cap,
+            "percent": percent,
+        }
+    return {"date": today, "providers": providers}
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return "429" in s or "quota" in s or "rate limit" in s
+
+
+def _fallback_order(primary: str) -> List[str]:
+    order = [primary] + [p for p in _FALLBACK_CHAIN if p != primary]
+    seen = set()
+    result = []
+    for p in order:
+        if p not in seen and _provider_configured(p) and p in _PROVIDERS:
+            seen.add(p)
+            result.append(p)
+    return result
+
+
 def generate_reply(provider: str, system: str, history: List[Dict[str, str]]) -> str:
     handler = _PROVIDERS.get(provider)
     if handler is None:
         return "ระบบไม่รู้จัก AI ที่ท่านเลือก โปรดตรวจสอบค่า ACTIVE_AI ครับ"
-    try:
-        return handler(system, history)
-    except ProviderNotConfigured as exc:
-        return f"ยังไม่ได้ตั้งค่า {exc.env_name} ในไฟล์ .env ครับท่าน"
-    except Exception as exc:
-        log.error("Generation error (%s): %s", provider, exc)
-        exc_str = str(exc).lower()
-        if "429" in exc_str or "quota" in exc_str or "rate limit" in exc_str:
-            return f"⚠️ **แจ้งเตือนจากระบบ:** สมองกล {provider.upper()} มีการเรียกใช้งานเกินขีดจำกัด (Quota Exceeded / Rate Limit) ของโควต้าฟรีครับ\n\nโปรดรอสักครู่แล้วลองใหม่ หรือเปลี่ยนไปใช้สมองกลตัวอื่น (เช่นตั้งค่า `ACTIVE_AI=ollama`) ในไฟล์ `.env` ครับ"
-        return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกลครับ: {exc}"
+    last_quota_provider = None
+    for p in _fallback_order(provider):
+        try:
+            reply = _PROVIDERS[p](system, history)
+            if p != provider:
+                reply = f"_(⚠️ {provider.upper()} เกินโควต้าชั่วคราว ระบบสลับไปใช้ {p.upper()} แทนให้อัตโนมัติ)_\n\n" + reply
+            return reply
+        except ProviderNotConfigured:
+            continue
+        except Exception as exc:
+            if _is_quota_error(exc):
+                log.warning("Provider %s hit quota/rate-limit, trying fallback: %s", p, exc)
+                last_quota_provider = p
+                continue
+            log.error("Generation error (%s): %s", p, exc)
+            return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกลครับ: {exc}"
+    if last_quota_provider:
+        return f"⚠️ **แจ้งเตือนจากระบบ:** สมองกลที่ตั้งค่าไว้ทั้งหมดติดโควต้า/ขีดจำกัดของฟรีเทียร์ครับ (ล่าสุดคือ {last_quota_provider.upper()})\n\nโปรดรอสักครู่แล้วลองใหม่ครับ"
+    return "ไม่มี AI ที่ตั้งค่าไว้พร้อมใช้งานครับ โปรดตรวจสอบ API Key ใน .env"
 
 
 def _chat_gemini_stream(system: str, history: List[Dict[str, str]]):
@@ -1506,56 +1617,99 @@ def _chat_gemini_stream(system: str, history: List[Dict[str, str]]):
         for m in prior
     ]
     chat = model.start_chat(history=gemini_history)
+    last_chunk = None
     for chunk in chat.send_message(latest, stream=True):
+        last_chunk = chunk
         if getattr(chunk, "text", ""):
             yield chunk.text
+    usage = getattr(last_chunk, "usage_metadata", None) if last_chunk is not None else None
+    _record_usage("gemini", getattr(usage, "total_token_count", 0) if usage is not None else 0)
 
 
 def _chat_openai_compat_stream(api_key: str, base_url: str, model: str,
-                               system: str, history: List[Dict[str, str]]):
-    """Yield reply chunks from any OpenAI-compatible server (Groq / Ollama)."""
+                               system: str, history: List[Dict[str, str]],
+                               usage_provider: Optional[str] = None):
+    """Yield reply chunks from any OpenAI-compatible server (Groq / Ollama).
+    usage_provider requests token accounting via stream_options — only passed
+    for Groq, since Ollama's local server isn't guaranteed to support that
+    OpenAI extension field."""
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key, base_url=base_url)
     messages = [{"role": "system", "content": system}] + history
+    kwargs = {}
+    if usage_provider:
+        kwargs["stream_options"] = {"include_usage": True}
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=settings.max_tokens,
         stream=True,
+        **kwargs,
     )
     for chunk in stream:
         delta = chunk.choices[0].delta.content if chunk.choices else None
         if delta:
             yield delta
+        if usage_provider and getattr(chunk, "usage", None):
+            _record_usage(usage_provider, chunk.usage.total_tokens)
+
+
+def _stream_one_provider(provider: str, system: str, history: List[Dict[str, str]]):
+    """Yield chunks from exactly one provider. Raises on failure before any output."""
+    if provider in ("gemini", "google"):
+        yield from _chat_gemini_stream(system, history)
+    elif provider == "groq":
+        if not settings.groq_api_key:
+            raise ProviderNotConfigured("GROQ_API_KEY")
+        yield from _chat_openai_compat_stream(
+            settings.groq_api_key, settings.groq_base_url, settings.groq_model,
+            system, history, usage_provider="groq")
+    elif provider == "ollama":
+        yield from _chat_openai_compat_stream(
+            settings.ollama_api_key or "ollama", settings.ollama_base_url,
+            settings.ollama_model, system, history)
+    else:
+        yield generate_reply(provider, system, history)
 
 
 def generate_reply_stream(provider: str, system: str, history: List[Dict[str, str]]):
-    """Stream reply chunks. Providers without native streaming yield once."""
-    try:
-        if provider in ("gemini", "google"):
-            yield from _chat_gemini_stream(system, history)
-        elif provider == "groq":
-            if not settings.groq_api_key:
-                raise ProviderNotConfigured("GROQ_API_KEY")
-            yield from _chat_openai_compat_stream(
-                settings.groq_api_key, settings.groq_base_url, settings.groq_model,
-                system, history)
-        elif provider == "ollama":
-            yield from _chat_openai_compat_stream(
-                settings.ollama_api_key or "ollama", settings.ollama_base_url,
-                settings.ollama_model, system, history)
-        else:
-            yield generate_reply(provider, system, history)
-    except ProviderNotConfigured as exc:
-        yield f"ยังไม่ได้ตั้งค่า {exc.env_name} ในไฟล์ .env ครับท่าน"
-    except Exception as exc:  # noqa: BLE001
-        log.error("Streaming error (%s): %s", provider, exc)
-        exc_str = str(exc).lower()
-        if "429" in exc_str or "quota" in exc_str or "rate limit" in exc_str:
-            yield f"⚠️ **แจ้งเตือนจากระบบ:** สมองกล {provider.upper()} มีการเรียกใช้งานเกินขีดจำกัด (Quota Exceeded / Rate Limit) ของโควต้าฟรีครับ\n\nโปรดรอสักครู่แล้วลองใหม่ หรือเปลี่ยนไปใช้สมองกลตัวอื่น (เช่นตั้งค่า `ACTIVE_AI=ollama`) ในไฟล์ `.env` ครับ"
-        else:
+    """Stream reply chunks, falling back to the next configured provider on
+    quota/rate-limit errors — same reasoning as generate_reply(). Only falls
+    back if the failing provider hadn't already yielded any output (a
+    mid-stream failure just surfaces as an error, since we can't un-send
+    chunks the user already saw)."""
+    last_quota_provider = None
+    for p in _fallback_order(provider):
+        yielded_any = False
+        try:
+            for chunk in _stream_one_provider(p, system, history):
+                if not yielded_any and p != provider:
+                    yield f"_(⚠️ {provider.upper()} เกินโควต้าชั่วคราว ระบบสลับไปใช้ {p.upper()} แทนให้อัตโนมัติ)_\n\n"
+                yielded_any = True
+                yield chunk
+            return
+        except ProviderNotConfigured as exc:
+            if yielded_any:
+                yield f"\n\nยังไม่ได้ตั้งค่า {exc.env_name} ในไฟล์ .env ครับท่าน"
+                return
+            continue
+        except Exception as exc:  # noqa: BLE001
+            if yielded_any:
+                log.error("Streaming error mid-response (%s): %s", p, exc)
+                yield f"\n\n⚠️ การเชื่อมต่อขาดหายกลางคันครับ: {exc}"
+                return
+            if _is_quota_error(exc):
+                log.warning("Provider %s hit quota/rate-limit, trying fallback: %s", p, exc)
+                last_quota_provider = p
+                continue
+            log.error("Streaming error (%s): %s", p, exc)
             yield f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกลครับ: {exc}"
+            return
+    if last_quota_provider:
+        yield f"⚠️ **แจ้งเตือนจากระบบ:** สมองกลที่ตั้งค่าไว้ทั้งหมดติดโควต้า/ขีดจำกัดของฟรีเทียร์ครับ (ล่าสุดคือ {last_quota_provider.upper()})\n\nโปรดรอสักครู่แล้วลองใหม่ครับ"
+    else:
+        yield "ไม่มี AI ที่ตั้งค่าไว้พร้อมใช้งานครับ โปรดตรวจสอบ API Key ใน .env"
 
 
 def fallback_reply(user_msg: str) -> str:
@@ -1689,6 +1843,14 @@ def get_system_log():
     """Most-recent-first feed of real backend log lines (admin logins, commands
     run, knowledge reloads...) for the frontend's SYSTEM LOG panel."""
     return {"entries": list(_log_buffer)[::-1][:20]}
+
+
+@app.get("/api/token-status")
+def get_token_status_endpoint():
+    """Per-provider token/request usage today, for the frontend's TOKEN
+    STATUS panel — real counters accumulated from each API response's usage
+    field, not an estimate."""
+    return get_token_status()
 
 
 class SecurityRequest(BaseModel):
