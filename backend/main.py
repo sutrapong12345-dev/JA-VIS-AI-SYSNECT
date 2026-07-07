@@ -1333,6 +1333,11 @@ def _chat_anthropic(system: str, history: List[Dict[str, str]]) -> str:
         client_kwargs["base_url"] = settings.claude_base_url
     client = anthropic.Anthropic(**client_kwargs)
 
+    # NOTE: these must raise (not return a friendly string) — a returned
+    # string looks like a successful reply to the fallback dispatcher in
+    # generate_reply()/generate_reply_stream(), which then never tries the
+    # next provider. Raising lets _is_quota_error() classify it and fall
+    # back correctly; the friendly Thai text is preserved in the message.
     try:
         message = client.messages.create(
             model=settings.claude_model,
@@ -1340,15 +1345,15 @@ def _chat_anthropic(system: str, history: List[Dict[str, str]]) -> str:
             system=system,
             messages=history,
         )
-    except anthropic.AuthenticationError:
-        return "คีย์ Claude ไม่ถูกต้องครับท่าน โปรดตรวจสอบ CLAUDE_API_KEY"
-    except anthropic.NotFoundError:
-        return f"ไม่พบโมเดล '{settings.claude_model}' ครับท่าน โปรดตรวจสอบ CLAUDE_MODEL"
-    except anthropic.RateLimitError:
-        return "ระบบ Claude ถูกจำกัดอัตราการใช้งานชั่วคราวครับท่าน โปรดลองใหม่อีกครั้ง"
+    except anthropic.AuthenticationError as exc:
+        raise RuntimeError("คีย์ Claude ไม่ถูกต้องครับท่าน โปรดตรวจสอบ CLAUDE_API_KEY") from exc
+    except anthropic.NotFoundError as exc:
+        raise RuntimeError(f"ไม่พบโมเดล '{settings.claude_model}' ครับท่าน โปรดตรวจสอบ CLAUDE_MODEL") from exc
+    except anthropic.RateLimitError as exc:
+        raise RuntimeError(f"429 rate limit: ระบบ Claude ถูกจำกัดอัตราการใช้งานชั่วคราวครับท่าน: {exc}") from exc
     except anthropic.APIError as exc:
         log.error("Anthropic API error: %s", exc)
-        return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Claude ครับท่าน: {exc}"
+        raise RuntimeError(f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Claude ครับท่าน: {exc}") from exc
 
     if getattr(message, "usage", None):
         _record_usage("claude", message.usage.input_tokens + message.usage.output_tokens)
@@ -1371,18 +1376,18 @@ def _chat_gemini(system: str, history: List[Dict[str, str]]) -> str:
         {"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
         for m in prior
     ]
+    # Must raise on failure, not return a string — see the note on
+    # _chat_anthropic above for why swallowing errors here breaks fallback.
     try:
         chat = model.start_chat(history=gemini_history)
         response = chat.send_message(latest)
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            _record_usage("gemini", getattr(usage, "total_token_count", 0))
-        else:
-            _record_usage("gemini", 0)
-        return response.text
     except Exception as exc:  # google SDK raises a variety of exception types
         log.error("Gemini error: %s", exc)
-        return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Gemini ครับท่าน: {exc}"
+        raise RuntimeError(f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Gemini ครับท่าน: {exc}") from exc
+
+    usage = getattr(response, "usage_metadata", None)
+    _record_usage("gemini", getattr(usage, "total_token_count", 0) if usage is not None else 0)
+    return response.text
 
 
 def _chat_ollama(system: str, history: List[Dict[str, str]]) -> str:
@@ -1396,12 +1401,13 @@ def _chat_ollama(system: str, history: List[Dict[str, str]]) -> str:
             messages=messages,
             max_tokens=settings.max_tokens,
         )
-        if getattr(response, "usage", None):
-            _record_usage("ollama", response.usage.total_tokens)
-        return response.choices[0].message.content
     except Exception as exc:
         log.error("Ollama error: %s", exc)
-        return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Ollama ครับท่าน: {exc}"
+        raise RuntimeError(f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Ollama ครับท่าน: {exc}") from exc
+
+    if getattr(response, "usage", None):
+        _record_usage("ollama", response.usage.total_tokens)
+    return response.choices[0].message.content
 
 
 def _chat_groq(system: str, history: List[Dict[str, str]]) -> str:
@@ -1418,12 +1424,13 @@ def _chat_groq(system: str, history: List[Dict[str, str]]) -> str:
             messages=messages,
             max_tokens=settings.max_tokens,
         )
-        if getattr(response, "usage", None):
-            _record_usage("groq", response.usage.total_tokens)
-        return response.choices[0].message.content
     except Exception as exc:
         log.error("Groq error: %s", exc)
-        return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Groq ครับท่าน: {exc}"
+        raise RuntimeError(f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Groq ครับท่าน: {exc}") from exc
+
+    if getattr(response, "usage", None):
+        _record_usage("groq", response.usage.total_tokens)
+    return response.choices[0].message.content
 
 
 _PROVIDERS = {
@@ -1545,10 +1552,14 @@ def get_token_status() -> Dict[str, Any]:
         reqs = entry["requests"] if entry["date"] == today else 0
         metric, cap = cap_info["metric"], cap_info["cap"]
         percent = None
+        # Reported uncapped (can exceed 100 — e.g. Groq counts tokens from
+        # responses that already landed before the daily cap kicked in), so
+        # the number honestly reflects reality instead of silently pinning
+        # at 100%. The frontend clamps only the progress-bar width.
         if metric == "tokens" and cap:
-            percent = round(min(used, cap) / cap * 100, 1)
+            percent = round(used / cap * 100, 1)
         elif metric == "requests" and cap:
-            percent = round(min(reqs, cap) / cap * 100, 1)
+            percent = round(reqs / cap * 100, 1)
         providers[name] = {
             "configured": _provider_configured(name),
             "tokens_today": used,
@@ -1562,7 +1573,10 @@ def get_token_status() -> Dict[str, Any]:
 
 def _is_quota_error(exc: Exception) -> bool:
     s = str(exc).lower()
-    return "429" in s or "quota" in s or "rate limit" in s
+    return (
+        "429" in s or "quota" in s or "rate limit" in s
+        or "credit balance" in s or "insufficient_quota" in s
+    )
 
 
 def _fallback_order(primary: str) -> List[str]:
@@ -1592,6 +1606,7 @@ def generate_reply(provider: str, system: str, history: List[Dict[str, str]]) ->
         except Exception as exc:
             if _is_quota_error(exc):
                 log.warning("Provider %s hit quota/rate-limit, trying fallback: %s", p, exc)
+                _record_usage(p, 0)  # 0 tokens billed, but the attempt still counts against the daily request cap
                 last_quota_provider = p
                 continue
             log.error("Generation error (%s): %s", p, exc)
@@ -1701,6 +1716,7 @@ def generate_reply_stream(provider: str, system: str, history: List[Dict[str, st
                 return
             if _is_quota_error(exc):
                 log.warning("Provider %s hit quota/rate-limit, trying fallback: %s", p, exc)
+                _record_usage(p, 0)  # 0 tokens billed, but the attempt still counts against the daily request cap
                 last_quota_provider = p
                 continue
             log.error("Streaming error (%s): %s", p, exc)

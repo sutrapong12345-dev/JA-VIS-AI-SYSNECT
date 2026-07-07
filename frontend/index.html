@@ -1760,7 +1760,8 @@ async function fetchTokenStatus() {
       const unit = p.cap_metric === 'requests' ? 'คำขอ' : 'token';
       const used = p.cap_metric === 'requests' ? p.requests_today : p.tokens_today;
       const barColor = p.percent >= 90 ? 'background:#ff4d4d;' : (p.percent >= 70 ? 'background:#ffb020;' : '');
-      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${p.percent}%)</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
+      const percentLabel = p.percent > 100 ? `เกินโควต้า (${p.percent}%)` : `${p.percent}%`;
+      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${percentLabel})</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
     }).join('');
     document.getElementById('token-status-list').innerHTML = html || '<div class="log-empty">ไม่มีข้อมูล</div>';
   } catch (err) {
