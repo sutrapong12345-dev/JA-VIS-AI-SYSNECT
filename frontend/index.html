@@ -1,0 +1,2520 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S. — SYSNECT AI Agent</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<!-- Tailwind CSS (Play CDN). preflight is disabled so Tailwind coexists with the
+     custom JARVIS CSS without resetting it. Theme tokens below mirror the design system. -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    corePlugins: { preflight: false },
+    theme: {
+      extend: {
+        colors: {
+          jvbg: '#030610', jvbg2: '#061226',
+          jvcyan: '#00d9ff', jvcyanb: '#7ff5ff', jvcyand: '#006a8a',
+          jvgold: '#ffb800', jvred: '#ff3b3b', jvgreen: '#00ff88',
+          jvtext: '#c8e8ff', jvdim: '#6a9bb8'
+        },
+        fontFamily: {
+          orbitron: ['Orbitron', 'sans-serif'],
+          rajdhani: ['Rajdhani', 'sans-serif'],
+          techmono: ['"Share Tech Mono"', 'monospace']
+        },
+        boxShadow: { jvglow: '0 0 15px rgba(0,217,255,0.4)' }
+      }
+    }
+  };
+</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  :root {
+    --bg-primary: #030610;
+    --bg-secondary: #061226;
+    --bg-panel: rgba(8, 22, 42, 0.55);
+    --cyan: #00d9ff;
+    --cyan-bright: #7ff5ff;
+    --cyan-dim: #006a8a;
+    --gold: #ffb800;
+    --red: #ff3b3b;
+    --green: #00ff88;
+    --text: #c8e8ff;
+    --text-dim: #6a9bb8;
+    --border: rgba(0, 217, 255, 0.25);
+    --border-bright: rgba(0, 217, 255, 0.6);
+  }
+  
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg-primary);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    user-select: none;
+  }
+  
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: 
+      radial-gradient(ellipse at 20% 30%, rgba(0, 217, 255, 0.08), transparent 50%),
+      radial-gradient(ellipse at 80% 70%, rgba(255, 184, 0, 0.04), transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgba(0, 100, 150, 0.06), transparent 70%);
+    pointer-events: none;
+    z-index: 1;
+  }
+  
+  #bg-canvas {
+    position: fixed; inset: 0;
+    z-index: 0;
+    opacity: 0.7;
+  }
+  
+  /* ===== BOOT SCREEN ===== */
+  #boot-screen {
+    position: fixed; inset: 0;
+    background: var(--bg-primary);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    transition: opacity 0.8s ease;
+  }
+  
+  #boot-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
+  }
+  
+  .boot-content {
+    text-align: center;
+    max-width: 600px;
+    padding: 0 20px;
+  }
+  
+  .boot-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 64px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: var(--cyan);
+    text-shadow: 0 0 30px rgba(0, 217, 255, 0.6);
+    margin-bottom: 8px;
+    animation: titlePulse 2s ease-in-out infinite;
+  }
+  
+  @keyframes titlePulse {
+    0%, 100% { text-shadow: 0 0 20px rgba(0, 217, 255, 0.4); }
+    50% { text-shadow: 0 0 40px rgba(0, 217, 255, 0.9), 0 0 60px rgba(0, 217, 255, 0.3); }
+  }
+  
+  .boot-subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 4px;
+    margin-bottom: 40px;
+  }
+  
+  .boot-log {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--cyan);
+    text-align: left;
+    height: 180px;
+    margin-bottom: 30px;
+    padding: 15px;
+    background: rgba(0, 20, 40, 0.4);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  
+  .boot-log-line {
+    margin-bottom: 4px;
+    opacity: 0;
+    animation: logAppear 0.3s forwards;
+  }
+  
+  .boot-log-line .prefix { color: var(--green); }
+  .boot-log-line .warn { color: var(--gold); }
+  
+  @keyframes logAppear {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  
+  .boot-progress {
+    width: 100%;
+    height: 4px;
+    background: rgba(0, 217, 255, 0.15);
+    overflow: hidden;
+    position: relative;
+  }
+  
+  .boot-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--cyan-dim), var(--cyan), var(--cyan-bright));
+    box-shadow: 0 0 10px var(--cyan);
+    transition: width 0.3s ease;
+  }
+  
+  .boot-percent {
+    margin-top: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    color: var(--cyan);
+  }
+  
+  /* ===== MAIN INTERFACE ===== */
+  #main-interface {
+    position: relative;
+    width: 100%; height: 100%;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 280px 1fr 280px;
+    /* minmax(0,1fr): the middle row must NEVER grow beyond the viewport,
+       otherwise tall chat content pushes the input/footer off-screen and
+       nothing can scroll (body is overflow:hidden). */
+    grid-template-rows: 60px minmax(0, 1fr) 40px;
+    gap: 12px;
+    padding: 12px;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
+  
+  #main-interface.visible { opacity: 1; }
+  
+  /* ===== HUD TOP ===== */
+  .hud-top {
+    grid-column: 1 / 4;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    position: relative;
+    z-index: 100;
+  }
+  
+  .hud-top::before, .hud-top::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    border: 2px solid var(--cyan);
+  }
+  .hud-top::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  .hud-top::after { top: -1px; right: -1px; border-left: none; border-bottom: none; }
+  
+  .hud-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .hud-logo {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 18px;
+    color: var(--cyan);
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
+  }
+  
+  .hud-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: dotPulse 1.5s ease-in-out infinite;
+  }
+  
+  @keyframes dotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  
+  .hud-time {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--cyan-bright);
+    letter-spacing: 2px;
+  }
+  
+  .hud-date {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: right;
+  }
+  
+  .profile-wrap { position: relative; }
+
+  .hud-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: rgba(0, 217, 255, 0.08);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-family: 'Rajdhani', sans-serif;
+    transition: all 0.2s ease;
+  }
+  .hud-user:hover { background: rgba(0, 217, 255, 0.18); border-color: var(--cyan); }
+  .hud-user i { color: var(--gold); }
+  .hud-user span { font-size: 13px; color: var(--text); letter-spacing: 1px; }
+  .profile-caret { font-size: 10px !important; color: var(--text-dim) !important; transition: transform 0.2s ease; }
+  .hud-user.open .profile-caret { transform: rotate(180deg); }
+  /* admin state */
+  .hud-user.is-admin { border-color: var(--green); background: rgba(0, 255, 136, 0.1); }
+  .hud-user.is-admin > i { color: var(--green); }
+
+  .profile-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 240px;
+    background: rgba(6, 18, 38, 0.97);
+    border: 1px solid var(--border-bright);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 217, 255, 0.15);
+    z-index: 50;
+    padding: 6px;
+    animation: authIn 0.18s ease;
+  }
+  .profile-menu[hidden] { display: none; }
+  .profile-menu-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 10px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 6px;
+  }
+  .profile-menu-head > i { font-size: 22px; color: var(--gold); }
+  .profile-menu.is-admin .profile-menu-head > i { color: var(--green); }
+  .profile-menu-name { font-family: 'Orbitron', sans-serif; font-size: 12px; color: var(--cyan-bright); letter-spacing: 1px; }
+  .profile-menu-role { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+  .profile-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 9px 10px; cursor: pointer;
+    background: transparent; border: none; text-align: left;
+    color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 13px; letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+  }
+  .profile-menu-item i { width: 16px; color: var(--cyan); }
+  .profile-menu-item:hover { background: rgba(0, 217, 255, 0.12); }
+  .profile-menu-item.danger i { color: var(--red); }
+  .profile-menu-item.danger:hover { background: rgba(255, 59, 59, 0.12); }
+
+  /* ===== PANELS ===== */
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .panel::before, .panel::after {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    border: 1px solid var(--cyan);
+  }
+  .panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  .panel::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+  
+  .panel-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 2px;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .panel-title .badge {
+    font-size: 9px;
+    padding: 2px 6px;
+    background: rgba(0, 217, 255, 0.15);
+    color: var(--cyan-bright);
+  }
+  
+  .panel-left {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    min-height: 0;               /* allow shrinking inside the grid row */
+    overscroll-behavior: contain;
+  }
+
+  .panel-right {
+    grid-column: 3;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    min-height: 0;               /* allow shrinking inside the grid row */
+    overscroll-behavior: contain;
+  }
+  
+  /* Metric bars */
+  .metric {
+    margin-bottom: 12px;
+  }
+  
+  .metric-head {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  
+  .metric-name { color: var(--text-dim); letter-spacing: 1px; }
+  .metric-value { color: var(--cyan-bright); font-weight: bold; }
+  
+  .metric-bar {
+    height: 6px;
+    background: rgba(0, 217, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .metric-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+    box-shadow: 0 0 8px var(--cyan);
+    transition: width 0.8s ease;
+    position: relative;
+  }
+  
+  .metric-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    animation: metricShine 2s linear infinite;
+  }
+  
+  @keyframes metricShine {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+  }
+  
+  /* Sensor grid */
+  .sensor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  
+  .sensor-cell {
+    background: rgba(0, 217, 255, 0.05);
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+  }
+  
+  .sensor-cell .label { color: var(--text-dim); display: block; font-size: 9px; }
+  .sensor-cell .val { color: var(--cyan-bright); font-weight: bold; }
+
+  /* Live system log feed (real backend log lines, not simulated) */
+  .log-feed { max-height: 150px; overflow-y: auto; font-family: 'Share Tech Mono', monospace; font-size: 10px; }
+  .log-feed::-webkit-scrollbar { width: 4px; }
+  .log-feed::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .log-line { color: var(--text-dim); margin-bottom: 5px; line-height: 1.4; word-break: break-word; }
+  .log-line .time { color: var(--cyan-dim); }
+  .log-line .lvl-info { color: var(--cyan); }
+  .log-line .lvl-warning { color: var(--gold); }
+  .log-line .lvl-error { color: var(--red); }
+  .log-empty { color: var(--text-dim); font-size: 11px; font-style: italic; }
+
+  /* ===== CENTER PANEL ===== */
+  .panel-center {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    position: relative;
+    min-height: 0;   /* critical: lets .chat-log flex/scroll instead of growing */
+  }
+  
+  /* Arc Reactor */
+  .arc-reactor-wrap {
+    position: relative;
+    width: 320px;
+    height: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .arc-reactor {
+    position: relative;
+    width: 280px;
+    height: 280px;
+  }
+  
+  .reactor-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid transparent;
+  }
+  
+  .ring-outer {
+    inset: 0;
+    border: 3px solid rgba(0, 217, 255, 0.2);
+    border-top-color: var(--cyan);
+    border-right-color: var(--cyan);
+    box-shadow: 
+      0 0 30px rgba(0, 217, 255, 0.3),
+      inset 0 0 30px rgba(0, 217, 255, 0.1);
+    animation: spinCW 8s linear infinite;
+  }
+  
+  .ring-mid {
+    inset: 25px;
+    border: 2px solid rgba(0, 217, 255, 0.3);
+    border-bottom-color: var(--cyan-bright);
+    border-left-color: var(--cyan-bright);
+    animation: spinCCW 6s linear infinite;
+  }
+  
+  .ring-inner {
+    inset: 50px;
+    border: 1px dashed var(--cyan);
+    animation: spinCW 12s linear infinite;
+  }
+  
+  .ring-tick {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: 
+      conic-gradient(from 0deg, transparent 0deg, transparent 12deg, var(--cyan) 12deg, var(--cyan) 14deg, transparent 14deg);
+    -webkit-mask: radial-gradient(circle, transparent 130px, black 132px, black 138px, transparent 140px);
+    mask: radial-gradient(circle, transparent 130px, black 132px, black 138px, transparent 140px);
+    animation: spinCW 20s linear infinite;
+    opacity: 0.6;
+  }
+  
+  @keyframes spinCW { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes spinCCW { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+  
+  .reactor-core {
+    position: absolute;
+    inset: 75px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #ffffff, var(--cyan-bright) 20%, var(--cyan) 50%, var(--cyan-dim) 80%, transparent);
+    box-shadow: 
+      0 0 40px var(--cyan),
+      0 0 80px rgba(0, 217, 255, 0.6),
+      inset 0 0 20px rgba(255, 255, 255, 0.8);
+    animation: corePulse 2.5s ease-in-out infinite;
+  }
+  
+  .reactor-core::before {
+    content: '';
+    position: absolute;
+    inset: 15px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.9), transparent 60%);
+  }
+  
+  .reactor-core.listening {
+    background: radial-gradient(circle at 35% 35%, #ffffff, #ffe080 20%, var(--gold) 50%, #aa6600 80%, transparent);
+    box-shadow: 
+      0 0 40px var(--gold),
+      0 0 80px rgba(255, 184, 0, 0.6),
+      inset 0 0 20px rgba(255, 255, 255, 0.8);
+  }
+  
+  @keyframes corePulse {
+    0%, 100% { transform: scale(1); filter: brightness(1); }
+    50% { transform: scale(1.05); filter: brightness(1.15); }
+  }
+  
+  /* Status text */
+  .status-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--cyan);
+    text-align: center;
+    margin-bottom: 8px;
+    height: 18px;
+    letter-spacing: 1px;
+  }
+  
+  .status-text .typing::after {
+    content: '_';
+    animation: blink 1s steps(1) infinite;
+  }
+  
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+  
+  /* Chat log */
+  .chat-log {
+    width: 100%;
+    max-width: 700px;
+    height: 180px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;  /* wheel at top/bottom doesn't chain to page */
+    padding: 10px;
+    background: rgba(0, 15, 30, 0.5);
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 14px;
+    /* no scroll-behavior:smooth here — it fights streaming auto-scroll + user wheel */
+    user-select: text;             /* chat content must be copyable */
+  }
+  
+  .chat-log::-webkit-scrollbar { width: 4px; }
+  .chat-log::-webkit-scrollbar-track { background: transparent; }
+  .chat-log::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  
+  .chat-msg {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border-left: 2px solid;
+    animation: msgIn 0.4s ease;
+  }
+  
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  
+  .chat-msg.user {
+    border-color: var(--gold);
+    background: rgba(255, 184, 0, 0.05);
+  }
+  
+  .chat-msg.user.admin {
+    border-color: var(--green);
+    background: rgba(0, 255, 136, 0.05);
+  }
+  
+  .chat-msg.jarvis {
+    border-color: var(--cyan);
+    background: rgba(0, 217, 255, 0.05);
+  }
+  
+  .chat-msg .role {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin-bottom: 3px;
+  }
+  
+  .chat-msg.user .role { color: var(--gold); }
+  .chat-msg.user.admin .role { color: var(--green); }
+  .chat-msg.jarvis .role { color: var(--cyan); }
+  
+  .chat-msg .text { color: var(--text); line-height: 1.5; word-wrap: break-word; }
+  .chat-msg .text strong { color: var(--cyan-bright); font-weight: 700; }
+  .chat-msg .text em { color: var(--gold); font-style: italic; }
+  .chat-msg .text a { color: var(--cyan-bright); text-decoration: underline; }
+  .chat-msg .text code {
+    font-family: 'Share Tech Mono', monospace;
+    background: rgba(0, 217, 255, 0.12);
+    color: var(--cyan-bright);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.92em;
+  }
+  .chat-msg .text pre {
+    background: rgba(0, 15, 30, 0.7);
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    margin: 6px 0;
+    overflow-x: auto;
+    border-radius: 4px;
+  }
+  .chat-msg .text pre code { background: none; padding: 0; color: var(--text); }
+  .chat-msg .text .md-h {
+    display: block;
+    color: var(--cyan-bright);
+    font-weight: 700;
+    font-size: 1.05em;
+    letter-spacing: 0.5px;
+    margin: 8px 0 4px;
+  }
+  .chat-msg .text .md-hr {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 8px 0;
+  }
+  .jv-cursor {
+    display: inline-block;
+    color: var(--cyan);
+    animation: jvBlink 1s steps(1) infinite;
+    font-weight: 700;
+  }
+  @keyframes jvBlink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+  
+  /* Input area */
+  .input-area {
+    width: 100%;
+    max-width: 700px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    background: rgba(0, 20, 40, 0.6);
+    border: 1px solid var(--border);
+    transition: all 0.3s ease;
+  }
+  
+  .input-area:focus-within {
+    border-color: var(--cyan);
+    box-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
+  }
+  
+  .input-area.listening {
+    border-color: var(--gold);
+    box-shadow: 0 0 20px rgba(255, 184, 0, 0.4);
+    animation: listenPulse 1.5s ease-in-out infinite;
+  }
+  
+  @keyframes listenPulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 184, 0, 0.4); }
+    50% { box-shadow: 0 0 30px rgba(255, 184, 0, 0.7); }
+  }
+  
+  #user-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px;
+    padding: 8px 12px;
+    letter-spacing: 0.5px;
+    user-select: text;  /* body is user-select:none — re-enable for typing/editing */
+  }
+  
+  #user-input::placeholder { color: var(--text-dim); }
+  
+  .input-btn {
+    width: 40px; height: 40px;
+    background: rgba(0, 217, 255, 0.1);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: all 0.2s ease;
+  }
+  
+  .input-btn:hover {
+    background: rgba(0, 217, 255, 0.2);
+    border-color: var(--cyan);
+    box-shadow: 0 0 15px rgba(0, 217, 255, 0.4);
+  }
+  
+  .input-btn.mic.active {
+    background: rgba(255, 184, 0, 0.2);
+    border-color: var(--gold);
+    color: var(--gold);
+    animation: micPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 184, 0, 0.6); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 184, 0, 0); }
+  }
+
+  /* Vision (screenshot) + Clipboard buttons */
+  .input-btn.vision-btn { color: var(--green); border-color: rgba(0, 255, 136, 0.3); }
+  .input-btn.vision-btn:hover { background: rgba(0, 255, 136, 0.1); border-color: var(--green); box-shadow: 0 0 15px rgba(0, 255, 136, 0.4); }
+  .input-btn.vision-btn.scanning { animation: visionScan 0.6s ease-in-out infinite alternate; }
+  @keyframes visionScan {
+    from { box-shadow: 0 0 10px rgba(0, 255, 136, 0.4); }
+    to { box-shadow: 0 0 22px rgba(0, 255, 136, 0.85); }
+  }
+  .input-btn.clipboard-btn { color: var(--gold); border-color: rgba(255, 184, 0, 0.3); }
+  .input-btn.clipboard-btn:hover { background: rgba(255, 184, 0, 0.1); border-color: var(--gold); box-shadow: 0 0 15px rgba(255, 184, 0, 0.4); }
+
+  /* Holographic audio visualizer ring around the arc reactor */
+  #reactor-visualizer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+  
+  /* ===== RIGHT PANEL CONTENT ===== */
+  /* .info-row and .cmd-chip are now styled with Tailwind utilities in the markup */
+
+  .weather-display {
+    text-align: center;
+    padding: 10px 0;
+  }
+  
+  .weather-icon {
+    font-size: 36px;
+    color: var(--gold);
+    margin-bottom: 6px;
+    text-shadow: 0 0 15px rgba(255, 184, 0, 0.5);
+  }
+  
+  .weather-temp {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--cyan-bright);
+  }
+  
+  .weather-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+  
+  /* ===== HUD BOTTOM ===== */
+  .hud-bottom {
+    grid-column: 1 / 4;
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    position: relative;
+  }
+  
+  .hud-bottom span { color: var(--cyan); }
+  
+  /* Scrollbars */
+  .panel-left::-webkit-scrollbar,
+  .panel-right::-webkit-scrollbar { width: 4px; }
+  .panel-left::-webkit-scrollbar-thumb,
+  .panel-right::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+
+  /* ===== CHAT FOCUS MODE (activated on first message) ===== */
+  #main-interface.chat-active {
+    grid-template-columns: 0px 1fr 0px;
+  }
+  #main-interface.chat-active .panel-left,
+  #main-interface.chat-active .panel-right {
+    display: none;
+  }
+  #main-interface.chat-active .panel-center {
+    padding: 16px 28px 16px 170px;   /* left gutter reserved for the orb */
+    justify-content: flex-start;
+  }
+  #main-interface.chat-active .status-text,
+  #main-interface.chat-active .reactor-label {
+    display: none;
+  }
+  /* Motion JARVIS shrinks and docks to the bottom-left */
+  #main-interface.chat-active .arc-reactor-wrap {
+    position: fixed;
+    left: 18px;
+    bottom: 54px;
+    width: 130px;
+    height: 130px;
+    z-index: 6;
+    pointer-events: auto;  /* clickable */
+    cursor: pointer;
+    transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  #main-interface.chat-active .arc-reactor {
+    transform: scale(0.45);
+    transform-origin: center center;
+    transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  /* Chat expands to fill the screen (scrolls inside, never grows past it) */
+  #main-interface.chat-active .chat-log {
+    flex: 1 1 0;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: 0;
+    margin-bottom: 14px;
+  }
+  #main-interface.chat-active .input-area {
+    max-width: 100%;
+    flex-shrink: 0;  /* input bar must never be squeezed out by a long chat */
+  }
+
+  /* ===== AUTH MODAL (opened by typing 'login') ===== */
+  .auth-overlay {
+    position: fixed; inset: 0; z-index: 900;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(2, 8, 18, 0.75);
+    backdrop-filter: blur(6px);
+  }
+  .auth-overlay[hidden] { display: none; }
+  .auth-panel {
+    width: min(360px, 90vw);
+    background: rgba(6, 18, 38, 0.95);
+    border: 1px solid var(--border-bright);
+    box-shadow: 0 0 40px rgba(0, 217, 255, 0.25);
+    padding: 26px 28px;
+    position: relative;
+    animation: authIn 0.3s ease;
+  }
+  .auth-panel::before, .auth-panel::after {
+    content: ''; position: absolute; width: 16px; height: 16px;
+    border: 2px solid var(--cyan);
+  }
+  .auth-panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  .auth-panel::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+  @keyframes authIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+  .auth-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 16px; font-weight: 700;
+    color: var(--cyan); letter-spacing: 2px; margin-bottom: 4px;
+  }
+  .auth-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; color: var(--text-dim); letter-spacing: 1px; margin-bottom: 18px;
+  }
+  .auth-label {
+    display: block;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; color: var(--text-dim); letter-spacing: 1px; margin: 10px 0 4px;
+  }
+  .auth-input {
+    width: 100%; padding: 9px 12px;
+    background: rgba(0, 20, 40, 0.7);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif; font-size: 15px;
+    outline: none; user-select: text;
+  }
+  .auth-input:focus { border-color: var(--cyan); box-shadow: 0 0 12px rgba(0, 217, 255, 0.3); }
+  .auth-error {
+    min-height: 16px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; color: var(--red); margin-top: 10px;
+  }
+  .auth-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .auth-btn {
+    flex: 1; padding: 9px 0; cursor: pointer;
+    background: rgba(0, 217, 255, 0.08);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    font-family: 'Orbitron', sans-serif; font-size: 11px; letter-spacing: 1px;
+    transition: all 0.2s ease;
+  }
+  .auth-btn:hover { background: rgba(0, 217, 255, 0.2); border-color: var(--cyan); }
+  .auth-btn.primary { background: rgba(0, 217, 255, 0.18); border-color: var(--border-bright); }
+  .auth-panel.shake { animation: authShake 0.4s; }
+  @keyframes authShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+  }
+
+  /* ===== ADMIN CONTROL PANEL (drawer) ===== */
+  .admin-overlay {
+    position: fixed; inset: 0; z-index: 800;
+    background: rgba(2, 8, 18, 0.6);
+    backdrop-filter: blur(3px);
+  }
+  .admin-overlay[hidden] { display: none; }
+  .admin-drawer {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: min(440px, 92vw);
+    background: rgba(5, 14, 30, 0.98);
+    border-left: 1px solid var(--border-bright);
+    box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    animation: drawerIn 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @keyframes drawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  .admin-drawer::-webkit-scrollbar { width: 6px; }
+  .admin-drawer::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .admin-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: rgba(5, 14, 30, 0.98); z-index: 2;
+  }
+  .admin-title { font-family: 'Orbitron', sans-serif; font-size: 15px; color: var(--cyan); letter-spacing: 1px; }
+  .admin-title i { color: var(--green); margin-right: 6px; }
+  .admin-close {
+    width: 30px; height: 30px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    font-size: 15px; transition: all 0.15s ease;
+  }
+  .admin-close:hover { color: var(--red); border-color: var(--red); }
+  .admin-section { padding: 16px 20px; border-bottom: 1px solid rgba(0, 217, 255, 0.08); }
+  .admin-section-title {
+    font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--cyan);
+    letter-spacing: 2px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .admin-badge {
+    font-family: 'Share Tech Mono', monospace; font-size: 10px;
+    background: rgba(0, 217, 255, 0.15); color: var(--cyan-bright); padding: 1px 7px; border-radius: 8px;
+  }
+  .admin-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .admin-stat {
+    background: rgba(0, 217, 255, 0.05); border: 1px solid var(--border);
+    padding: 8px 10px; display: flex; flex-direction: column; gap: 3px;
+  }
+  .admin-stat-k { font-family: 'Share Tech Mono', monospace; font-size: 9px; color: var(--text-dim); letter-spacing: 1px; }
+  .admin-stat-v { font-family: 'Orbitron', sans-serif; font-size: 13px; color: var(--cyan-bright); word-break: break-all; }
+  .admin-teach-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .admin-input {
+    flex: 1; padding: 9px 12px; background: rgba(0, 20, 40, 0.7);
+    border: 1px solid var(--border); color: var(--text);
+    font-family: 'Rajdhani', sans-serif; font-size: 14px; outline: none; user-select: text;
+  }
+  .admin-input:focus { border-color: var(--cyan); box-shadow: 0 0 10px rgba(0, 217, 255, 0.25); }
+  .admin-btn {
+    cursor: pointer; padding: 9px 14px; white-space: nowrap;
+    background: rgba(0, 217, 255, 0.12); border: 1px solid var(--border); color: var(--cyan);
+    font-family: 'Rajdhani', sans-serif; font-size: 13px; letter-spacing: 0.5px; transition: all 0.15s ease;
+  }
+  .admin-btn:hover { background: rgba(0, 217, 255, 0.25); border-color: var(--cyan); }
+  .admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .admin-btn.primary { background: rgba(0, 255, 136, 0.12); border-color: rgba(0, 255, 136, 0.4); color: var(--green); }
+  .admin-btn.primary:hover { background: rgba(0, 255, 136, 0.25); }
+  .admin-btn.wide { width: 100%; text-align: center; margin-top: 4px; }
+  .admin-fact-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; }
+  .admin-fact-list::-webkit-scrollbar { width: 4px; }
+  .admin-fact-list::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .admin-fact {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: rgba(0, 217, 255, 0.04); border: 1px solid rgba(0, 217, 255, 0.12);
+    padding: 8px 10px; font-family: 'Rajdhani', sans-serif; font-size: 13px; color: var(--text);
+  }
+  .admin-fact-text { flex: 1; line-height: 1.4; word-break: break-word; user-select: text; }
+  .admin-fact-del {
+    cursor: pointer; background: transparent; border: none; color: var(--text-dim);
+    font-size: 13px; padding: 2px 4px; transition: color 0.15s ease; flex-shrink: 0;
+  }
+  .admin-fact-del:hover { color: var(--red); }
+  .admin-empty { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); padding: 10px; text-align: center; }
+  .admin-note { font-family: 'Rajdhani', sans-serif; font-size: 12px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+  .admin-toast {
+    position: sticky; bottom: 0; margin: 12px 20px;
+    padding: 10px 14px; font-family: 'Rajdhani', sans-serif; font-size: 13px;
+    background: rgba(0, 255, 136, 0.12); border: 1px solid rgba(0, 255, 136, 0.4); color: var(--green);
+    animation: authIn 0.2s ease;
+  }
+  .admin-toast[hidden] { display: none; }
+  .admin-toast.error { background: rgba(255, 59, 59, 0.12); border-color: var(--red); color: var(--red); }
+
+  /* ===== RESPONSIVE FALLBACK (narrow windows) ===== */
+  @media (max-width: 900px) {
+    #main-interface {
+      grid-template-columns: 1fr;
+      grid-template-rows: 56px minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 8px;
+    }
+    .panel-left, .panel-right { display: none; }
+    .panel-center { grid-column: 1; }
+    .hud-top { flex-wrap: wrap; gap: 6px; }
+    .arc-reactor-wrap { width: 200px; height: 200px; }
+    .arc-reactor { transform: scale(0.7); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<!-- BOOT SCREEN -->
+<div id="boot-screen">
+  <div class="boot-content">
+    <h1 class="boot-title">J.A.R.V.I.S.</h1>
+    <p class="boot-subtitle">SYSNECT · ENTERPRISE AI AGENT</p>
+    <div class="boot-log" id="boot-log"></div>
+    <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
+    <div class="boot-percent" id="boot-percent">0%</div>
+  </div>
+</div>
+
+<!-- MAIN INTERFACE -->
+<main id="main-interface">
+  
+  <!-- TOP HUD -->
+  <header class="hud-top">
+    <div class="hud-section">
+      <div class="hud-logo">J.A.R.V.I.S.</div>
+      <div class="hud-status">
+        <span class="status-dot"></span>
+        <span id="system-status-indicator">SYSTEM ONLINE</span>
+      </div>
+    </div>
+    <div class="hud-section">
+      <div class="hud-status">
+        <i class="fas fa-satellite-dish" style="color:var(--cyan)"></i>
+        <span>UPLINK: SYSNECT · IT OPERATIONS</span>
+      </div>
+    </div>
+    <div class="hud-section">
+      <div>
+        <div class="hud-time" id="hud-time">00:00:00</div>
+        <div class="hud-date" id="hud-date">LOADING...</div>
+      </div>
+      <div class="profile-wrap">
+        <button class="hud-user" id="profile-btn" title="โปรไฟล์ / เข้าสู่ระบบ">
+          <i class="fas fa-user-shield"></i>
+          <span id="profile-name">SYSNECT STAFF</span>
+          <i class="fas fa-chevron-down profile-caret"></i>
+        </button>
+        <div class="profile-menu" id="profile-menu" hidden>
+          <div class="profile-menu-head">
+            <i class="fas fa-id-badge"></i>
+            <div>
+              <div class="profile-menu-name" id="profile-menu-name">SYSNECT STAFF</div>
+              <div class="profile-menu-role" id="profile-menu-role">โหมดพนักงาน · จำกัดสิทธิ์</div>
+            </div>
+          </div>
+          <button class="profile-menu-item" id="profile-login" data-act="login">
+            <i class="fas fa-right-to-bracket"></i> เข้าสู่ระบบ (Admin)
+          </button>
+          <button class="profile-menu-item" id="profile-admin" data-act="admin" hidden>
+            <i class="fas fa-sliders"></i> แผงควบคุมแอดมิน
+          </button>
+          <button class="profile-menu-item danger" id="profile-logout" data-act="logout" hidden>
+            <i class="fas fa-right-from-bracket"></i> ออกจากระบบ
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+  
+  <!-- LEFT PANEL -->
+  <aside class="panel-left">
+    <div class="panel">
+      <div class="panel-title">SYSTEM DIAGNOSTICS <span class="badge">LIVE</span></div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-name">CPU LOAD</span><span class="metric-value" id="cpu-val">--%</span></div>
+        <div class="metric-bar"><div class="metric-fill" id="cpu-bar" style="width:0%"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-name">MEMORY</span><span class="metric-value" id="mem-val">--%</span></div>
+        <div class="metric-bar"><div class="metric-fill" id="mem-bar" style="width:0%"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-name">NETWORK</span><span class="metric-value" id="net-val">--%</span></div>
+        <div class="metric-bar"><div class="metric-fill" id="net-bar" style="width:0%"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-name">POWER CORE</span><span class="metric-value" id="pwr-val">--%</span></div>
+        <div class="metric-bar"><div class="metric-fill" id="pwr-bar" style="width:0%"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-name">AI PROCESS</span><span class="metric-value" id="ai-val">--%</span></div>
+        <div class="metric-bar"><div class="metric-fill" id="ai-bar" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">SENSORS <span class="badge">LIVE</span></div>
+      <div class="sensor-grid">
+        <div class="sensor-cell"><span class="label">CPU TEMP</span><span class="val" id="sensor-cputemp">--</span></div>
+        <div class="sensor-cell"><span class="label">GPU TEMP</span><span class="val" id="sensor-gputemp">--</span></div>
+        <div class="sensor-cell"><span class="label">GPU LOAD</span><span class="val" id="sensor-gpuload">--</span></div>
+        <div class="sensor-cell"><span class="label">DISK</span><span class="val" id="sensor-disk">--</span></div>
+        <div class="sensor-cell"><span class="label">PROCESSES</span><span class="val" id="sensor-proc">--</span></div>
+        <div class="sensor-cell"><span class="label">UPTIME</span><span class="val" id="sensor-uptime">--</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">QUICK COMMANDS</div>
+      <div class="flex flex-wrap gap-[5px] mt-1.5">
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="SYSNECT คือบริษัทอะไร ทำอะไรบ้าง">SYSNECT คือ?</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="ระบบ Ticket ของ SYSNECT ทำงานอย่างไร มีสถานะอะไรบ้าง">ระบบ Ticket</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="จะแจ้งปัญหา IT ได้อย่างไร">แจ้งปัญหา IT</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="ช่วยร่างอีเมลแจ้งลูกค้าให้หน่อย">✉️ ร่างอีเมล</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="ช่วยสรุปงานและสรุปข้อมูลให้ฉันหน่อย">📝 สรุปข้อมูล</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="สแกนสถานะระบบคอมพิวเตอร์ตอนนี้">🖥️ สแกนระบบ</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="เปิดโปรแกรม Notepad ให้หน่อย">📂 เปิดโปรแกรม</div>
+        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="[save log data]">💾 เซฟประวัติแชท</div>
+        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-fill="[สอน] ">🧠 สอน JARVIS</div>
+        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-cmd="[ความรู้]">📚 ความรู้ที่สอน</div>
+        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-cmd="[สร้างชุดฝึก]">🎓 สร้างชุดฝึก</div>
+      </div>
+    </div>
+  </aside>
+  
+  <!-- CENTER PANEL -->
+  <section class="panel-center">
+    
+    <div class="arc-reactor-wrap">
+      <div class="arc-reactor" id="arc-reactor">
+        <div class="ring-outer reactor-ring"></div>
+        <div class="ring-mid reactor-ring"></div>
+        <div class="ring-tick"></div>
+        <div class="ring-inner reactor-ring"></div>
+        <div class="reactor-core" id="reactor-core"></div>
+        <div class="reactor-label">SYSNECT CORE · AI AGENT</div>
+      </div>
+      <canvas id="reactor-visualizer" width="320" height="320"></canvas>
+    </div>
+    
+    <div class="status-text" id="status-text">
+      <span class="typing" id="status-typing">SYSTEM READY · AWAITING COMMAND</span>
+    </div>
+    
+    <div class="chat-log" id="chat-log"></div>
+    
+    <div class="input-area" id="input-area">
+      <input type="text" id="user-input" placeholder="พิมพ์คำสั่งหรือคำถามของคุณ..." autocomplete="off">
+      <input type="file" id="file-upload" style="display: none;" accept=".txt,.pdf,.docx,image/*">
+      <button class="input-btn" id="upload-btn" title="อัปโหลดเอกสารหรือรูปภาพ">
+        <i class="fas fa-paperclip"></i>
+      </button>
+      <button class="input-btn vision-btn" id="vision-btn" title="สแกนหน้าจอและวิเคราะห์ (แอดมิน)">
+        <i class="fas fa-eye"></i>
+      </button>
+      <button class="input-btn clipboard-btn" id="clipboard-btn" title="ดึงข้อความจากคลิปบอร์ด (แอดมิน)">
+        <i class="fas fa-clipboard"></i>
+      </button>
+      <button class="input-btn mic" id="mic-btn" title="เริ่มพูด">
+        <i class="fas fa-microphone"></i>
+      </button>
+      <button class="input-btn" id="send-btn" title="ส่งข้อความ">
+        <i class="fas fa-paper-plane"></i>
+      </button>
+    </div>
+  </section>
+  
+  <!-- RIGHT PANEL -->
+  <aside class="panel-right">
+    <div class="panel">
+      <div class="panel-title">ENVIRONMENT</div>
+      <div class="weather-display">
+        <div class="weather-icon"><i class="fas fa-satellite"></i></div>
+        <div class="weather-temp" id="weather-temp">--°C</div>
+        <div class="weather-desc" id="weather-desc">LOADING...</div>
+      </div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">WIND</span><span class="text-jvcyanb" id="wind-val">-- km/h</span></div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">HUMIDITY</span><span class="text-jvcyanb" id="humid-val">--%</span></div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">FEELS LIKE</span><span class="text-jvcyanb" id="feels-val">--°C</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">AI ENGINE <span class="badge">LIVE</span></div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">PROVIDER</span><span class="text-jvcyanb" id="ai-provider">--</span></div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">MODEL</span><span class="text-jvcyanb" id="ai-model">--</span></div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">KNOWLEDGE</span><span class="text-jvcyanb" id="ai-kb">--</span></div>
+      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">SESSION</span><span class="text-jvcyanb" id="ai-session">--</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">SYSTEM LOG <span class="badge">LIVE</span></div>
+      <div class="log-feed" id="log-feed"><div class="log-empty">รอข้อมูล...</div></div>
+    </div>
+  </aside>
+  
+  <!-- BOTTOM HUD -->
+  <footer class="hud-bottom">
+    <div>GEO: <span id="geo-coords">13.7563°N 100.5018°E</span></div>
+    <div>J.A.R.V.I.S. <span>v9.5.0</span> · SYSNECT <span>AI AGENT</span></div>
+    <div>ENCRYPTION: <span>AES-256</span> · STATUS: <span id="conn-status">SECURE</span></div>
+  </footer>
+  
+</main>
+
+<!-- AUTH MODAL (type 'login' in the chat to open) -->
+<div id="auth-modal" class="auth-overlay" hidden>
+  <div class="auth-panel" id="auth-panel">
+    <div class="auth-title"><i class="fas fa-shield-halved"></i> AUTHENTICATION</div>
+    <div class="auth-sub">SYSNECT SECURE ACCESS · ADMIN ONLY</div>
+    <label class="auth-label" for="auth-user">USERNAME</label>
+    <input id="auth-user" class="auth-input" type="text" autocomplete="username" placeholder="ชื่อผู้ใช้">
+    <label class="auth-label" for="auth-pass">PASSWORD</label>
+    <input id="auth-pass" class="auth-input" type="password" autocomplete="current-password" placeholder="รหัสผ่าน">
+    <div class="auth-error" id="auth-error"></div>
+    <div class="auth-actions">
+      <button class="auth-btn primary" id="auth-submit">AUTHENTICATE</button>
+      <button class="auth-btn" id="auth-cancel">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN CONTROL PANEL (drawer, admin only) -->
+<div id="admin-overlay" class="admin-overlay" hidden>
+  <aside class="admin-drawer" id="admin-drawer">
+    <div class="admin-head">
+      <div class="admin-title"><i class="fas fa-sliders"></i> แผงควบคุมแอดมิน</div>
+      <button class="admin-close" id="admin-close" title="ปิด"><i class="fas fa-xmark"></i></button>
+    </div>
+
+    <!-- System status -->
+    <div class="admin-section">
+      <div class="admin-section-title">ระบบ (SYSTEM)</div>
+      <div class="admin-stat-grid">
+        <div class="admin-stat"><span class="admin-stat-k">PROVIDER</span><span class="admin-stat-v" id="ap-provider">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">MODEL</span><span class="admin-stat-v" id="ap-model">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">KB FILES</span><span class="admin-stat-v" id="ap-kbfiles">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">KB CHARS</span><span class="admin-stat-v" id="ap-kbchars">--</span></div>
+      </div>
+    </div>
+
+    <!-- Knowledge management -->
+    <div class="admin-section">
+      <div class="admin-section-title">ความรู้ที่สอน (KNOWLEDGE) <span id="ap-fact-count" class="admin-badge">0</span></div>
+      <div class="admin-teach-row">
+        <input id="ap-teach-input" class="admin-input" type="text" placeholder="พิมพ์ความรู้ใหม่ที่จะสอน JARVIS...">
+        <button class="admin-btn primary" id="ap-teach-btn"><i class="fas fa-brain"></i> สอน</button>
+      </div>
+      <div class="admin-fact-list" id="ap-fact-list">
+        <div class="admin-empty">กำลังโหลด...</div>
+      </div>
+    </div>
+
+    <!-- Training -->
+    <div class="admin-section">
+      <div class="admin-section-title">ฝึกโมเดล (TRAINING)</div>
+      <div class="admin-stat-grid">
+        <div class="admin-stat"><span class="admin-stat-k">LOG SESSIONS</span><span class="admin-stat-v" id="ap-logs">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">DATASET</span><span class="admin-stat-v" id="ap-dataset">--</span></div>
+      </div>
+      <button class="admin-btn wide" id="ap-build-btn"><i class="fas fa-graduation-cap"></i> สร้างชุดข้อมูลฝึกจากบทสนทนา</button>
+      <div class="admin-note" id="ap-build-note"></div>
+    </div>
+
+    <div class="admin-toast" id="admin-toast" hidden></div>
+  </aside>
+</div>
+
+<script>
+// ===== GLOBAL CONFIG =====
+const API_BASE = 'http://localhost:8000';
+
+// ===== BOOT SEQUENCE =====
+const bootMessages = [
+  { text: '[INIT] Initializing J.A.R.V.I.S. kernel...', delay: 200, type: 'ok' },
+  { text: '[CORE] Loading neural network models...', delay: 300, type: 'ok' },
+  { text: '[NET] Establishing uplink to Backend Server...', delay: 400, type: 'ok' },
+  { text: '[SEC] Verifying credentials... SYSNECT STAFF', delay: 350, type: 'ok' },
+  { text: '[SYS] Loading personality matrix...', delay: 300, type: 'ok' },
+  { text: '[IO] Initializing Web Speech API...', delay: 350, type: 'ok' },
+  { text: '[OK] All systems nominal. Welcome to SYSNECT, sir.', delay: 400, type: 'ok' }
+];
+
+const bootLog = document.getElementById('boot-log');
+const bootBar = document.getElementById('boot-bar');
+const bootPercent = document.getElementById('boot-percent');
+const bootScreen = document.getElementById('boot-screen');
+const mainInterface = document.getElementById('main-interface');
+
+let bootIndex = 0;
+
+function runBoot() {
+  if (bootIndex < bootMessages.length) {
+    const msg = bootMessages[bootIndex];
+    setTimeout(() => {
+      const line = document.createElement('div');
+      line.className = 'boot-log-line';
+      const cls = msg.type === 'warn' ? 'warn' : 'prefix';
+      line.innerHTML = `<span class="${cls}">›</span> ${msg.text}`;
+      bootLog.appendChild(line);
+      bootLog.scrollTop = bootLog.scrollHeight;
+      
+      let bootProgress = Math.round(((bootIndex + 1) / bootMessages.length) * 100);
+      bootBar.style.width = bootProgress + '%';
+      bootPercent.textContent = bootProgress + '%';
+      
+      bootIndex++;
+      runBoot();
+    }, msg.delay);
+  } else {
+    setTimeout(() => {
+      bootScreen.classList.add('fade-out');
+      mainInterface.classList.add('visible');
+      setTimeout(() => {
+        bootScreen.style.display = 'none';
+        initJarvis();
+      }, 800);
+    }, 600);
+  }
+}
+
+setTimeout(runBoot, 500);
+
+// ===== CLOCK =====
+function updateClock() {
+  const now = new Date();
+  document.getElementById('hud-time').textContent = now.toLocaleTimeString('th-TH');
+  document.getElementById('hud-date').textContent = now.toLocaleDateString('th-TH');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ===== REAL-TIME ENVIRONMENT (WEATHER & GPS) =====
+let userLat = 13.7563;
+let userLon = 100.5018;
+let currentWeatherString = "ยังไม่ทราบสภาพอากาศ";
+
+// Weather codes mapping
+const weatherCodes = {
+  0: { desc: 'CLEAR', icon: 'fa-sun' },
+  1: { desc: 'MAINLY CLEAR', icon: 'fa-cloud-sun' },
+  2: { desc: 'PARTLY CLOUDY', icon: 'fa-cloud-sun' },
+  3: { desc: 'OVERCAST', icon: 'fa-cloud' },
+  45: { desc: 'FOG', icon: 'fa-smog' },
+  48: { desc: 'DEPOSITING RIME FOG', icon: 'fa-smog' },
+  51: { desc: 'LIGHT DRIZZLE', icon: 'fa-cloud-rain' },
+  53: { desc: 'MODERATE DRIZZLE', icon: 'fa-cloud-rain' },
+  55: { desc: 'DENSE DRIZZLE', icon: 'fa-cloud-rain' },
+  61: { desc: 'SLIGHT RAIN', icon: 'fa-cloud-showers-heavy' },
+  63: { desc: 'MODERATE RAIN', icon: 'fa-cloud-showers-heavy' },
+  65: { desc: 'HEAVY RAIN', icon: 'fa-cloud-showers-heavy' },
+  80: { desc: 'SLIGHT RAIN SHOWERS', icon: 'fa-cloud-rain' },
+  95: { desc: 'THUNDERSTORM', icon: 'fa-bolt' },
+  96: { desc: 'THUNDERSTORM W/ HAIL', icon: 'fa-poo-storm' },
+};
+
+async function fetchRealWeather() {
+  try {
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${userLat}&longitude=${userLon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m`);
+    const data = await res.json();
+    const c = data.current;
+    if (!c) return;
+
+    const temp = Math.round(c.temperature_2m);
+    const feels = Math.round(c.apparent_temperature);
+    const humidity = Math.round(c.relative_humidity_2m);
+    const wind = c.wind_speed_10m;
+    const code = c.weather_code;
+    const isDay = c.is_day === 1;
+
+    const weatherInfo = weatherCodes[code] || { desc: 'UNKNOWN', icon: 'fa-cloud' };
+    // Use a moon icon at night for clear/mainly-clear skies
+    const icon = (!isDay && (code === 0 || code === 1)) ? 'fa-moon' : weatherInfo.icon;
+
+    document.getElementById('weather-temp').textContent = temp + '°C';
+    document.getElementById('weather-desc').textContent = weatherInfo.desc + ' · LOCAL';
+    document.getElementById('wind-val').textContent = wind + ' km/h';
+    document.getElementById('humid-val').textContent = humidity + '%';
+    document.getElementById('feels-val').textContent = feels + '°C';
+
+    currentWeatherString = `อุณหภูมิ ${temp}°C (รู้สึกเหมือน ${feels}°C), สภาพอากาศ: ${weatherInfo.desc}, ความชื้น ${humidity}%, ความเร็วลม ${wind} km/h`;
+
+    const iconEl = document.querySelector('.weather-icon i');
+    if (iconEl) iconEl.className = 'fas ' + icon;
+  } catch (e) {
+    console.error('Weather error:', e);
+    document.getElementById('weather-desc').textContent = 'WEATHER UNAVAILABLE';
+  }
+}
+
+function initRealTimeEnvironment() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      userLat = pos.coords.latitude;
+      userLon = pos.coords.longitude;
+      
+      // Update UI coords
+      const latStr = Math.abs(userLat).toFixed(4) + (userLat >= 0 ? '°N' : '°S');
+      const lonStr = Math.abs(userLon).toFixed(4) + (userLon >= 0 ? '°E' : '°W');
+      document.getElementById('geo-coords').textContent = `${latStr} ${lonStr}`;
+      
+      // Fetch weather for real coords
+      fetchRealWeather();
+    }, (err) => {
+      console.warn("Geolocation denied or error, using default BKK coords");
+      fetchRealWeather();
+    });
+  } else {
+    fetchRealWeather();
+  }
+  
+  // Refresh weather every 10 mins
+  setInterval(fetchRealWeather, 600000);
+}
+
+// ===== SYSTEM MONITORING (FETCH FROM BACKEND) =====
+async function fetchSystemStatus() {
+  try {
+    const res = await fetch(API_BASE + '/api/system-status');
+    const data = await res.json();
+    
+    document.getElementById('cpu-val').textContent = data.cpu + '%';
+    document.getElementById('cpu-bar').style.width = data.cpu + '%';
+    
+    document.getElementById('mem-val').textContent = data.memory + '%';
+    document.getElementById('mem-bar').style.width = data.memory + '%';
+    
+    document.getElementById('net-val').textContent = data.network + '%';
+    document.getElementById('net-bar').style.width = data.network + '%';
+    
+    document.getElementById('pwr-val').textContent = data.power + '%';
+    document.getElementById('pwr-bar').style.width = data.power + '%';
+    
+    document.getElementById('ai-val').textContent = data.ai + '%';
+    document.getElementById('ai-bar').style.width = data.ai + '%';
+    
+    const ind = document.getElementById('system-status-indicator');
+    ind.textContent = 'BACKEND ONLINE';
+    ind.style.color = ''; // reset from any prior offline (red) state
+  } catch (err) {
+    console.error("Cannot fetch system status", err);
+    const ind = document.getElementById('system-status-indicator');
+    ind.textContent = 'BACKEND OFFLINE';
+    ind.style.color = 'var(--red)';
+  }
+}
+
+// ===== AI ENGINE STATUS (from backend /api/health) =====
+async function fetchHealth() {
+  try {
+    const res = await fetch(API_BASE + '/api/health');
+    const h = await res.json();
+    document.getElementById('ai-provider').textContent = String(h.active_ai || '--').toUpperCase();
+    const model = (h.models && h.models[h.active_ai]) || '--';
+    document.getElementById('ai-model').textContent = model;
+    const kbCount = (h.knowledge && h.knowledge.files) ? h.knowledge.files.length : 0;
+    document.getElementById('ai-kb').textContent = kbCount + ' ไฟล์';
+  } catch (err) {
+    document.getElementById('ai-provider').textContent = 'OFFLINE';
+  }
+  document.getElementById('ai-session').textContent = String(sessionId || '').slice(0, 8);
+}
+
+// ===== SENSORS (real machine telemetry from backend /api/system-sensors) =====
+async function fetchSensors() {
+  try {
+    const res = await fetch(API_BASE + '/api/system-sensors');
+    const s = await res.json();
+    document.getElementById('sensor-cputemp').textContent = s.cpu_temp != null ? s.cpu_temp + '°C' : 'N/A';
+    document.getElementById('sensor-gputemp').textContent = s.gpu_temp != null ? s.gpu_temp + '°C' : 'N/A';
+    document.getElementById('sensor-gpuload').textContent = s.gpu_load != null ? s.gpu_load + '%' : 'N/A';
+    document.getElementById('sensor-disk').textContent = s.disk_percent != null ? s.disk_percent + '%' : 'N/A';
+    document.getElementById('sensor-proc').textContent = s.process_count != null ? s.process_count : 'N/A';
+    document.getElementById('sensor-uptime').textContent = s.uptime || 'N/A';
+  } catch (err) {
+    console.error("Cannot fetch sensors", err);
+  }
+}
+
+// ===== SYSTEM LOG (real backend log lines from /api/system-log) =====
+async function fetchSystemLog() {
+  try {
+    const res = await fetch(API_BASE + '/api/system-log');
+    const data = await res.json();
+    const feed = document.getElementById('log-feed');
+    const entries = data.entries || [];
+    if (!entries.length) {
+      feed.innerHTML = '<div class="log-empty">ยังไม่มีบันทึกระบบ...</div>';
+      return;
+    }
+    feed.innerHTML = entries.map(e => {
+      const lvlClass = 'lvl-' + String(e.level || 'info').toLowerCase();
+      return `<div class="log-line"><span class="time">[${e.time}]</span> <span class="${lvlClass}">${e.level}</span> ${escapeHtml(e.message)}</div>`;
+    }).join('');
+  } catch (err) {
+    console.error("Cannot fetch system log", err);
+  }
+}
+
+// Fetch stats every 3 seconds; AI engine info every 30 seconds; sensors/log every 5 seconds
+setInterval(fetchSystemStatus, 3000);
+setInterval(fetchHealth, 30000);
+setInterval(fetchSensors, 5000);
+setInterval(fetchSystemLog, 5000);
+
+// ===== SESSION ID (isolates conversation memory per client) =====
+let sessionId = localStorage.getItem('jarvis_session_id');
+if (!sessionId) {
+  sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
+  localStorage.setItem('jarvis_session_id', sessionId);
+}
+
+// ===== CHAT SYSTEM =====
+const chatLog = document.getElementById('chat-log');
+const userInput = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+const micBtn = document.getElementById('mic-btn');
+const statusTyping = document.getElementById('status-typing');
+const reactorCore = document.getElementById('reactor-core');
+
+// ===== Smart auto-scroll =====
+// Stick to the bottom while streaming, but if the user scrolls up to read,
+// STOP forcing them back down. Scrolling back near the bottom re-enables it.
+let autoScroll = true;
+chatLog.addEventListener('scroll', () => {
+  autoScroll = (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) < 60;
+});
+function scrollChat(force) {
+  if (force) autoScroll = true;
+  if (autoScroll) chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+// ===== Safe markdown rendering =====
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function renderMarkdown(text) {
+  let h = escapeHtml(text);
+  // 1) Pull code out first so no other rule (bold/bullets/<br>) mangles it
+  const codeBlocks = [];
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+    codeBlocks.push(code.replace(/\n+$/, ''));
+    return '\u0000B' + (codeBlocks.length - 1) + '\u0000';
+  });
+  const inlineCodes = [];
+  h = h.replace(/`([^`\n]+)`/g, (m, code) => {
+    inlineCodes.push(code);
+    return '\u0000I' + (inlineCodes.length - 1) + '\u0000';
+  });
+  // 2) Block-level: headings (###) and horizontal rules (---)
+  h = h.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="md-h">$1</strong>');
+  h = h.replace(/^\s*(?:[-*_]\s*){3,}$/gm, '<hr class="md-hr">');
+  // 3) Inline: bold, italic, links, list bullets
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  h = h.replace(/^\s*[-*]\s+/gm, '• ');
+  h = h.replace(/\n/g, '<br>');
+  // 4) Put code back, untouched
+  h = h.replace(/\u0000I(\d+)\u0000/g, (m, i) => '<code>' + inlineCodes[+i] + '</code>');
+  h = h.replace(/\u0000B(\d+)\u0000/g, (m, i) => '<pre><code>' + codeBlocks[+i] + '</code></pre>');
+  return h;
+}
+
+function addMessage(role, text) {
+  const msg = document.createElement('div');
+  msg.className = `chat-msg ${role}` + (role === 'user' && isAdmin ? ' admin' : '');
+  const roleEl = document.createElement('div');
+  roleEl.className = 'role';
+  roleEl.textContent = role === 'user' ? (isAdmin ? 'SYSNECT ADMIN' : 'SYSNECT STAFF') : 'J.A.R.V.I.S.';
+  const textEl = document.createElement('div');
+  textEl.className = 'text';
+  
+  let htmlContent = escapeHtml(text);
+  if (role === 'user') {
+    if (text.startsWith('[อัปโหลดรูปภาพ:')) {
+      htmlContent = `<i class="fas fa-image text-jvgreen mr-1.5"></i>${htmlContent}`;
+    } else if (text.startsWith('[อัปโหลดไฟล์:')) {
+      htmlContent = `<i class="fas fa-file-lines text-jvcyan mr-1.5"></i>${htmlContent}`;
+    }
+  }
+  textEl.innerHTML = role === 'user' ? htmlContent : renderMarkdown(text);
+  
+  msg.appendChild(roleEl);
+  msg.appendChild(textEl);
+  chatLog.appendChild(msg);
+  scrollChat(true); // a brand-new message always snaps to the bottom
+  return textEl; // so streaming can update it live
+}
+
+// ===== Text-to-Speech (natural Thai voice) =====
+let jarvisVoice = null;
+function pickThaiVoice() {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  return voices.find(v => v.lang === 'th-TH' && /google|natural|neural/i.test(v.name))
+      || voices.find(v => v.lang === 'th-TH')
+      || voices.find(v => v.lang && v.lang.toLowerCase().startsWith('th'))
+      || null;
+}
+if ('speechSynthesis' in window) {
+  jarvisVoice = pickThaiVoice();
+  window.speechSynthesis.onvoiceschanged = () => { jarvisVoice = pickThaiVoice(); };
+}
+function stripForSpeech(text) {
+  return String(text)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[#>_~|]/g, ' ')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function speakText(text, onEnd) {
+  if (!('speechSynthesis' in window)) { if (onEnd) onEnd(); return; }
+  const clean = stripForSpeech(text);
+  if (!clean) { if (onEnd) onEnd(); return; }
+  window.speechSynthesis.cancel(); // stop any previous utterance
+  const u = new SpeechSynthesisUtterance(clean);
+  u.lang = 'th-TH';
+  u.rate = 1.05;
+  u.pitch = 1.0;
+  u.volume = 1.0;
+  if (jarvisVoice) u.voice = jarvisVoice;
+  u.onstart = () => simulateJarvisSpeak(true);
+  u.onend = () => { simulateJarvisSpeak(false); if (onEnd) onEnd(); };
+  window.speechSynthesis.speak(u);
+}
+
+// ===== Voice conversation mode (hands-free mic <-> JARVIS loop) =====
+let recognition = null;          // assigned in initJarvis() if the browser supports it
+let voiceConversationActive = false;
+let voiceSoftStopped = false;    // true after the 20s no-response soft-stop, until the next real turn
+let silenceTimer20 = null;
+let silenceTimer30 = null;
+
+// Phrases that mean "I'm done talking" — end the voice session instead of asking the AI.
+const VOICE_END_PHRASES = [
+  'พอแล้ว', 'แค่นี้ก่อน', 'แค่นี้แหละ', 'แค่นี้พอ', 'จบการสนทนา', 'จบก่อนนะ', 'จบแค่นี้',
+  'หยุดคุยก่อน', 'หยุดสนทนา', 'ปิดการสนทนา', 'ปิดโหมดเสียง', 'พอก่อนนะ', 'ขอบคุณครับจบ', 'ขอบคุณค่ะจบ',
+  'goodbye', 'bye bye', 'stop conversation', 'end conversation',
+];
+function isVoiceEndPhrase(text) {
+  const low = (text || '').trim().toLowerCase();
+  return VOICE_END_PHRASES.some(p => low.includes(p));
+}
+
+function clearSilenceTimers() {
+  if (silenceTimer20) { clearTimeout(silenceTimer20); silenceTimer20 = null; }
+  if (silenceTimer30) { clearTimeout(silenceTimer30); silenceTimer30 = null; }
+}
+
+// Starts a fresh 20s/30s deadline for the user's NEXT voice turn. Call this
+// right after recognition.start() begins a genuinely new "waiting for you" phase.
+function startSilenceWatch() {
+  clearSilenceTimers();
+  voiceSoftStopped = false;
+  silenceTimer20 = setTimeout(() => {
+    if (!voiceConversationActive) return;
+    voiceSoftStopped = true; // stop the quiet auto-relisten in onerror; only the 30s timer or the user can act now
+    try { recognition.stop(); } catch (e) {}
+    statusTyping.textContent = 'ไม่ได้ยินการตอบกลับเกิน 20 วินาที หยุดฟังชั่วคราวครับ';
+  }, 20000);
+  silenceTimer30 = setTimeout(() => {
+    if (!voiceConversationActive) return;
+    endVoiceConversation('ไม่ได้ยินการตอบกลับนานเกินไป ผมขอปิดการสนทนาด้วยเสียงไว้ก่อนนะครับ พูดหรือกดไมค์ใหม่ได้เสมอครับ');
+  }, 30000);
+}
+
+// Fully ends the hands-free voice session. Pass a farewell string to have
+// JARVIS say it out loud (used for timeouts); pass null for a silent, manual stop.
+function endVoiceConversation(farewell) {
+  voiceConversationActive = false;
+  voiceSoftStopped = false;
+  clearSilenceTimers();
+  window.speechSynthesis.cancel();
+  try { recognition.stop(); } catch (e) {}
+  statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+  if (farewell) {
+    addMessage('jarvis', farewell);
+    speakText(farewell);
+  }
+}
+
+// ===== Holographic audio visualizer (ring of light bars around the arc reactor) =====
+const vizCanvas = document.getElementById('reactor-visualizer');
+const vizCtx = vizCanvas.getContext('2d');
+let isSimulatingSpeak = false;
+let vizData = new Array(64).fill(0);
+
+function simulateJarvisSpeak(active) {
+  isSimulatingSpeak = active;
+}
+
+function drawReactorVisualizer() {
+  requestAnimationFrame(drawReactorVisualizer);
+  const w = vizCanvas.width, h = vizCanvas.height;
+  vizCtx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2;
+  const baseRadius = 115; // just outside the outer reactor ring (280px arc-reactor in a 320px wrap)
+  const bars = 64;
+  for (let i = 0; i < bars; i++) {
+    let value;
+    if (isSimulatingSpeak) {
+      vizData[i] = vizData[i] * 0.8 + (Math.random() * 40 + 10) * 0.2;
+      value = vizData[i];
+    } else {
+      value = Math.abs(Math.sin(Date.now() / 500 + i * 0.2)) * 4 + 1.5; // gentle idle shimmer
+    }
+    const angle = (i / bars) * Math.PI * 2 - Math.PI / 2;
+    const x1 = cx + Math.cos(angle) * baseRadius;
+    const y1 = cy + Math.sin(angle) * baseRadius;
+    const x2 = cx + Math.cos(angle) * (baseRadius + value);
+    const y2 = cy + Math.sin(angle) * (baseRadius + value);
+    const alpha = 0.35 + Math.min(1, value / 50) * 0.6;
+    vizCtx.strokeStyle = `rgba(0, 217, 255, ${alpha})`;
+    vizCtx.lineWidth = 2.5;
+    vizCtx.shadowBlur = 8;
+    vizCtx.shadowColor = '#00d9ff';
+    vizCtx.beginPath();
+    vizCtx.moveTo(x1, y1);
+    vizCtx.lineTo(x2, y2);
+    vizCtx.stroke();
+  }
+}
+drawReactorVisualizer();
+
+function enterChatMode() {
+  const mi = document.getElementById('main-interface');
+  if (mi) mi.classList.add('chat-active');
+}
+
+let isProcessing = false; // block overlapping sends (they corrupt the stream/history)
+
+async function processInput(input, options = {}) {
+  const viaVoice = !!options.viaVoice;
+  if (!input.trim() || isProcessing) return;
+
+  // Local commands: open the auth modal / log out (never sent to the AI)
+  const lower = input.trim().toLowerCase();
+  if (lower === 'login' || lower === '[login]' || lower === 'เข้าสู่ระบบ') {
+    userInput.value = '';
+    openAuthModal();
+    return;
+  }
+  if (lower === 'logout' || lower === '[logout]' || lower === 'ออกจากระบบ') {
+    userInput.value = '';
+    doLogout();
+    return;
+  }
+
+  isProcessing = true;
+  sendBtn.style.opacity = '0.5';
+
+  // Voice conversation stays on the main dashboard (no docking to chat-active) —
+  // the messages still land in the (smaller) chat-log below the reactor.
+  if (!viaVoice) enterChatMode();
+  // If JARVIS is still talking from the previous turn, let the new question interrupt it.
+  window.speechSynthesis.cancel();
+  clearSilenceTimers(); // the user just spoke/typed, so any pending 20s/30s deadline is moot
+
+  // After JARVIS finishes speaking, resume listening automatically — but only
+  // if this turn started by voice and the conversation loop is still active.
+  const continueVoiceLoop = () => {
+    if (viaVoice && voiceConversationActive) {
+      setTimeout(() => {
+        try { recognition.start(); } catch (e) {}
+        startSilenceWatch(); // fresh 20s/30s deadline for the user's next turn
+      }, 500);
+    }
+  };
+
+  addMessage('user', input);
+  userInput.value = '';
+  statusTyping.textContent = 'THINKING...';
+
+  const el = addMessage('jarvis', '');
+  el.innerHTML = '<span class="jv-cursor">▌</span>';
+
+  let acc = '';
+  let finalReply = null;
+
+  try {
+    const resp = await fetch(API_BASE + '/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId })
+    });
+    if (!resp.ok || !resp.body) throw new Error('stream unavailable');
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      for (const part of parts) {
+        const line = part.replace(/^data:\s?/, '').trim();
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line); } catch (e) { continue; }
+        if (evt.delta) {
+          acc += evt.delta;
+          el.innerHTML = renderMarkdown(acc) + '<span class="jv-cursor">▌</span>';
+          scrollChat(false); // respects the user scrolling up to read
+        }
+        if (evt.done) {
+          finalReply = evt.reply;
+          if (evt.provider) {
+            document.getElementById('ai-provider').textContent = String(evt.provider).toUpperCase();
+          }
+        }
+      }
+    }
+
+    const text = (finalReply != null ? finalReply : acc) || '...';
+    el.innerHTML = renderMarkdown(text);
+    scrollChat(false);
+    if (text.includes('ADMIN MODE UNLOCKED')) setAdminBadge(true);
+    speakText(text, continueVoiceLoop);
+    statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+  } catch (err) {
+    console.error('stream failed, falling back:', err);
+    // Fallback to the non-streaming endpoint
+    try {
+      const r = await fetch(API_BASE + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId })
+      });
+      const d = await r.json();
+      el.innerHTML = renderMarkdown(d.reply);
+      scrollChat(false);
+      if (d.provider) {
+        document.getElementById('ai-provider').textContent = String(d.provider).toUpperCase();
+      }
+      if (String(d.reply).includes('ADMIN MODE UNLOCKED')) setAdminBadge(true);
+      speakText(d.reply, continueVoiceLoop);
+      statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+    } catch (e2) {
+      el.innerHTML = escapeHtml('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์ครับ');
+      statusTyping.textContent = 'CONNECTION ERROR';
+      speakText('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์ครับ', continueVoiceLoop);
+    }
+  } finally {
+    isProcessing = false;
+    sendBtn.style.opacity = '';
+  }
+}
+
+sendBtn.addEventListener('click', () => processInput(userInput.value));
+// keydown + isComposing: Enter mid-Thai-IME composition must not fire a send
+userInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) processInput(userInput.value);
+});
+
+// ===== AUTHENTICATION (login modal) =====
+const authModal = document.getElementById('auth-modal');
+const authPanel = document.getElementById('auth-panel');
+const authUser = document.getElementById('auth-user');
+const authPass = document.getElementById('auth-pass');
+const authErrorEl = document.getElementById('auth-error');
+
+function openAuthModal() {
+  authErrorEl.textContent = '';
+  authPass.value = '';
+  authModal.hidden = false;
+  authUser.focus();
+}
+function closeAuthModal() {
+  authModal.hidden = true;
+}
+let isAdmin = false;
+function setAdminBadge(on) {
+  isAdmin = !!on;
+  const label = on ? 'SYSNECT ADMIN' : 'SYSNECT STAFF';
+  const role = on ? 'โหมดผู้ดูแลระบบ · GOD MODE 🔓' : 'โหมดพนักงาน · จำกัดสิทธิ์';
+  const nameEl = document.getElementById('profile-name');
+  const menuName = document.getElementById('profile-menu-name');
+  const menuRole = document.getElementById('profile-menu-role');
+  if (nameEl) nameEl.textContent = label;
+  if (menuName) menuName.textContent = label;
+  if (menuRole) menuRole.textContent = role;
+  // toggle admin styling
+  const btn = document.getElementById('profile-btn');
+  const menu = document.getElementById('profile-menu');
+  if (btn) btn.classList.toggle('is-admin', on);
+  if (menu) menu.classList.toggle('is-admin', on);
+  // show login when staff, logout + admin panel when admin
+  const loginItem = document.getElementById('profile-login');
+  const logoutItem = document.getElementById('profile-logout');
+  const adminItem = document.getElementById('profile-admin');
+  if (loginItem) loginItem.hidden = on;
+  if (logoutItem) logoutItem.hidden = !on;
+  if (adminItem) adminItem.hidden = !on;
+  // if the admin panel is open and we just logged out, close it
+  if (!on) { const ov = document.getElementById('admin-overlay'); if (ov) ov.hidden = true; }
+
+  // Update existing user messages dynamically to reflect the active role theme
+  document.querySelectorAll('.chat-msg.user').forEach(msg => {
+    msg.classList.toggle('admin', on);
+    const roleEl = msg.querySelector('.role');
+    if (roleEl) {
+      roleEl.textContent = on ? 'SYSNECT ADMIN' : 'SYSNECT STAFF';
+    }
+  });
+}
+
+// ===== PROFILE MENU (top-right, connected to the login system) =====
+(function initProfileMenu() {
+  const btn = document.getElementById('profile-btn');
+  const menu = document.getElementById('profile-menu');
+  if (!btn || !menu) return;
+  function toggle(force) {
+    const show = force !== undefined ? force : menu.hidden;
+    menu.hidden = !show;
+    btn.classList.toggle('open', show);
+  }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', () => toggle(false));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') toggle(false); });
+  document.getElementById('profile-login').addEventListener('click', () => { toggle(false); openAuthModal(); });
+  document.getElementById('profile-logout').addEventListener('click', () => { toggle(false); doLogout(); });
+  document.getElementById('profile-admin').addEventListener('click', () => { toggle(false); openAdminPanel(); });
+})();
+
+// ===== ADMIN CONTROL PANEL =====
+const adminOverlay = document.getElementById('admin-overlay');
+function adminToast(msg, isErr) {
+  const t = document.getElementById('admin-toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isErr);
+  t.hidden = false;
+  clearTimeout(adminToast._t);
+  adminToast._t = setTimeout(() => { t.hidden = true; }, 3500);
+}
+async function apiJSON(url, opts) {
+  const r = await fetch(API_BASE + url, opts);
+  return r.json();
+}
+let adminPanelInterval = null;
+
+function openAdminPanel() {
+  adminOverlay.hidden = false;
+  loadAdminData();
+  if (adminPanelInterval) clearInterval(adminPanelInterval);
+  adminPanelInterval = setInterval(loadAdminData, 3000);
+}
+
+function closeAdminPanel() { 
+  adminOverlay.hidden = true; 
+  if (adminPanelInterval) {
+    clearInterval(adminPanelInterval);
+    adminPanelInterval = null;
+  }
+}
+
+async function loadAdminData() {
+  // system + KB info from /api/health
+  try {
+    const h = await apiJSON('/api/health');
+    const activeAi = h.active_ai || '--';
+    let modelName = '--';
+    if (activeAi === 'auto') {
+      const currentProvider = document.getElementById('ai-provider').textContent.toLowerCase();
+      const realModel = (h.models && h.models[currentProvider]) || '--';
+      document.getElementById('ap-provider').textContent = `AUTO (${currentProvider.toUpperCase()})`;
+      modelName = realModel;
+    } else {
+      document.getElementById('ap-provider').textContent = activeAi.toUpperCase();
+      modelName = (h.models && h.models[activeAi]) || '--';
+    }
+    document.getElementById('ap-model').textContent = modelName;
+    document.getElementById('ap-kbfiles').textContent = (h.knowledge && h.knowledge.files ? h.knowledge.files.length : 0) + ' ไฟล์';
+    document.getElementById('ap-kbchars').textContent = (h.knowledge && h.knowledge.chars != null ? h.knowledge.chars : '--');
+  } catch (e) { /* offline */ }
+  await loadLearnedFacts();
+  await loadTrainingStatus();
+}
+
+async function loadLearnedFacts() {
+  const list = document.getElementById('ap-fact-list');
+  try {
+    const d = await apiJSON('/api/knowledge/learned?session_id=' + encodeURIComponent(sessionId));
+    if (d.status !== 'ok') { list.innerHTML = '<div class="admin-empty">' + escapeHtml(d.message || 'โหลดไม่ได้') + '</div>'; return; }
+    document.getElementById('ap-fact-count').textContent = d.count;
+    if (d.kb) {
+      document.getElementById('ap-kbfiles').textContent = (d.kb.files ? d.kb.files.length : 0) + ' ไฟล์';
+      document.getElementById('ap-kbchars').textContent = d.kb.chars != null ? d.kb.chars : '--';
+    }
+    if (!d.count) { list.innerHTML = '<div class="admin-empty">ยังไม่มีความรู้ที่สอน — พิมพ์ด้านบนเพื่อเริ่มสอน</div>'; return; }
+    list.innerHTML = '';
+    d.facts.forEach(f => {
+      const row = document.createElement('div');
+      row.className = 'admin-fact';
+      const txt = document.createElement('div');
+      txt.className = 'admin-fact-text';
+      txt.innerHTML = escapeHtml(f.text.replace(/^- \[[^\]]*\]\s*/, '')); // strip the "- [date]" prefix
+      const del = document.createElement('button');
+      del.className = 'admin-fact-del';
+      del.title = 'ลบความรู้นี้';
+      del.innerHTML = '<i class="fas fa-trash"></i>';
+      del.addEventListener('click', () => forgetFact(f.index));
+      row.appendChild(txt);
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="admin-empty">เชื่อมต่อเซิร์ฟเวอร์ไม่ได้</div>';
+  }
+}
+
+async function loadTrainingStatus() {
+  try {
+    const s = await apiJSON('/api/training/status');
+    document.getElementById('ap-logs').textContent = (s.log_sessions != null ? s.log_sessions : '--') + ' ไฟล์';
+    document.getElementById('ap-dataset').textContent = (s.dataset_examples != null ? s.dataset_examples : '--') + ' คู่';
+  } catch (e) { /* offline */ }
+}
+
+async function teachFactUI() {
+  const input = document.getElementById('ap-teach-input');
+  const fact = input.value.trim();
+  if (!fact) { input.focus(); return; }
+  const btn = document.getElementById('ap-teach-btn');
+  btn.disabled = true;
+  try {
+    const d = await apiJSON('/api/knowledge/teach', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fact, session_id: sessionId })
+    });
+    if (d.status === 'ok') { input.value = ''; adminToast('🧠 ' + d.message); await loadLearnedFacts(); }
+    else adminToast(d.message || 'สอนไม่สำเร็จ', true);
+  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
+  btn.disabled = false;
+}
+
+async function forgetFact(index) {
+  // Deleting data always re-asks for the admin password, even though this
+  // session is already logged in — a safeguard against a hijacked/careless
+  // session (or someone else at the keyboard) wiping knowledge accidentally.
+  const password = window.prompt('ยืนยันการลบ: กรุณาใส่รหัสผ่านแอดมินอีกครั้งครับ');
+  if (password === null) return; // cancelled
+  try {
+    const d = await apiJSON('/api/knowledge/forget', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index, session_id: sessionId, password })
+    });
+    if (d.status === 'ok') { adminToast('🗑️ ลบความรู้แล้ว'); await loadLearnedFacts(); }
+    else adminToast(d.message || 'ลบไม่สำเร็จ', true);
+  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
+}
+
+async function buildDatasetUI() {
+  const btn = document.getElementById('ap-build-btn');
+  const note = document.getElementById('ap-build-note');
+  btn.disabled = true;
+  note.textContent = 'กำลังสร้างชุดข้อมูล...';
+  try {
+    const d = await apiJSON('/api/training/build', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    if (d.status === 'ok') {
+      note.textContent = `✅ สร้างชุดฝึกแล้ว ${d.examples} คู่ (จาก ${d.log_files} ไฟล์ log) → ${d.path}`;
+      adminToast('🎓 สร้างชุดฝึกสำเร็จ ' + d.examples + ' คู่');
+      await loadTrainingStatus();
+    } else { note.textContent = d.message || 'สร้างไม่สำเร็จ'; adminToast(d.message || 'สร้างไม่สำเร็จ', true); }
+  } catch (e) { note.textContent = 'เชื่อมต่อไม่ได้'; adminToast('เชื่อมต่อไม่ได้', true); }
+  btn.disabled = false;
+}
+
+document.getElementById('admin-close').addEventListener('click', closeAdminPanel);
+adminOverlay.addEventListener('click', (e) => { if (e.target === adminOverlay) closeAdminPanel(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !adminOverlay.hidden) closeAdminPanel(); });
+document.getElementById('ap-teach-btn').addEventListener('click', teachFactUI);
+document.getElementById('ap-teach-input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) teachFactUI(); });
+document.getElementById('ap-build-btn').addEventListener('click', buildDatasetUI);
+async function submitAuth() {
+  authErrorEl.textContent = '';
+  try {
+    const r = await fetch(API_BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: authUser.value, password: authPass.value, session_id: sessionId })
+    });
+    const d = await r.json();
+    if (d.status === 'success') {
+      closeAuthModal();
+      setAdminBadge(true);
+      enterChatMode();
+      addMessage('jarvis', d.message);
+      speakText('ยืนยันตัวตนสำเร็จ ปลดล็อกโหมดผู้ดูแลระบบแล้วครับบอส');
+    } else {
+      authErrorEl.textContent = '✖ ' + (d.message || 'เข้าสู่ระบบไม่สำเร็จ');
+      authPanel.classList.remove('shake');
+      void authPanel.offsetWidth; // restart the shake animation
+      authPanel.classList.add('shake');
+      authPass.value = '';
+      authPass.focus();
+    }
+  } catch (e) {
+    authErrorEl.textContent = '✖ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+  }
+}
+async function doLogout() {
+  try {
+    const r = await fetch(API_BASE + '/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    const d = await r.json();
+    setAdminBadge(false);
+    enterChatMode();
+    addMessage('jarvis', d.message || '🔒 ล็อกสิทธิ์แล้วครับ');
+  } catch (e) {
+    addMessage('jarvis', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ครับ');
+  }
+}
+// Restore the ADMIN badge after a page refresh (session may still be unlocked)
+async function fetchAuthStatus() {
+  try {
+    const r = await fetch(API_BASE + '/api/auth/status?session_id=' + encodeURIComponent(sessionId));
+    const d = await r.json();
+    setAdminBadge(!!d.is_admin);
+  } catch (e) { /* backend offline — leave badge as-is */ }
+}
+document.getElementById('auth-submit').addEventListener('click', submitAuth);
+document.getElementById('auth-cancel').addEventListener('click', closeAuthModal);
+authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
+[authUser, authPass].forEach(el => el.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) submitAuth();
+  if (e.key === 'Escape') closeAuthModal();
+}));
+
+// Quick commands
+// data-cmd  → sends the command immediately
+// data-fill → pre-fills the input (e.g. "[สอน] ") so the user types the rest
+document.querySelectorAll('.cmd-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const fill = chip.getAttribute('data-fill');
+    if (fill !== null) {
+      userInput.value = fill;
+      userInput.focus();
+      return;
+    }
+    processInput(chip.getAttribute('data-cmd'));
+  });
+});
+
+// ===== FILE & IMAGE UPLOAD / CLIPBOARD PASTE =====
+const fileUpload = document.getElementById('file-upload');
+const uploadBtn = document.getElementById('upload-btn');
+
+uploadBtn.addEventListener('click', () => {
+  fileUpload.click();
+});
+
+function addImageMessage(role, file) {
+  const msg = document.createElement('div');
+  msg.className = `chat-msg ${role}` + (role === 'user' && isAdmin ? ' admin' : '');
+  const roleEl = document.createElement('div');
+  roleEl.className = 'role';
+  roleEl.textContent = role === 'user' ? (isAdmin ? 'SYSNECT ADMIN' : 'SYSNECT STAFF') : 'J.A.R.V.I.S.';
+  const textEl = document.createElement('div');
+  textEl.className = 'text';
+  
+  const img = document.createElement('img');
+  img.src = URL.createObjectURL(file);
+  img.style.maxWidth = '100%';
+  img.style.maxHeight = '250px';
+  img.style.border = '1px solid var(--border)';
+  img.style.marginTop = '8px';
+  img.style.borderRadius = '4px';
+  img.style.boxShadow = '0 0 10px rgba(0, 217, 255, 0.15)';
+  
+  textEl.textContent = `[รูปภาพ: ${file.name || 'image.png'}]`;
+  textEl.appendChild(img);
+  
+  msg.appendChild(roleEl);
+  msg.appendChild(textEl);
+  chatLog.appendChild(msg);
+  scrollChat(true);
+}
+
+async function uploadFile(file, isImage = false) {
+  if (isProcessing) return;
+  
+  statusTyping.textContent = isImage ? 'ANALYZING IMAGE...' : 'READING DOCUMENT...';
+  uploadBtn.style.color = 'var(--gold)';
+  enterChatMode();
+  
+  if (isImage) {
+    addImageMessage('user', file);
+  } else {
+    addMessage('user', `[อัปโหลดไฟล์: ${file.name}]`);
+  }
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    const res = await fetch(API_BASE + '/api/upload?session_id=' + encodeURIComponent(sessionId), {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    addMessage('jarvis', data.message);
+    uploadBtn.style.color = data.status === 'success' ? 'var(--green)' : 'var(--red)';
+  } catch(err) {
+    addMessage('jarvis', 'อัปโหลดล้มเหลวครับ');
+    uploadBtn.style.color = 'var(--red)';
+  }
+  
+  setTimeout(() => uploadBtn.style.color = 'var(--cyan)', 3000);
+  statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+}
+
+fileUpload.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const isImage = file.type.startsWith('image/');
+  uploadFile(file, isImage);
+  fileUpload.value = ''; // reset
+});
+
+// Clipboard paste listener for user-input (supports images)
+userInput.addEventListener('paste', (e) => {
+  const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+  for (const item of items) {
+    if (item.type.indexOf('image') === 0) {
+      const file = item.getAsFile();
+      if (file) {
+        e.preventDefault();
+        uploadFile(file, true);
+      }
+    }
+  }
+});
+
+// ===== VISION (screen scan) + SMART CLIPBOARD (admin-only OS access) =====
+const visionBtn = document.getElementById('vision-btn');
+const clipboardBtn = document.getElementById('clipboard-btn');
+
+function base64ToFile(b64, mime, filename) {
+  const byteChars = atob(b64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  return new File([new Uint8Array(byteNumbers)], filename, { type: mime });
+}
+
+visionBtn.addEventListener('click', async () => {
+  if (isProcessing) return;
+  visionBtn.classList.add('scanning');
+  statusTyping.textContent = 'SCANNING VISUAL CORTEX...';
+  try {
+    const res = await fetch(API_BASE + '/api/os/screenshot?session_id=' + encodeURIComponent(sessionId));
+    const data = await res.json();
+    if (data.status === 'success') {
+      // Reuses the existing /api/upload image pipeline (Gemini vision OCR/analysis)
+      const file = base64ToFile(data.image, data.mime_type || 'image/png', 'screenshot.png');
+      await uploadFile(file, true);
+    } else {
+      enterChatMode();
+      addMessage('jarvis', data.message || 'ไม่สามารถสแกนหน้าจอได้ครับ');
+    }
+  } catch (err) {
+    enterChatMode();
+    addMessage('jarvis', 'ระบบ Vision ขัดข้องครับ ไม่สามารถเชื่อมต่อ Backend ได้');
+  }
+  visionBtn.classList.remove('scanning');
+  statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+});
+
+clipboardBtn.addEventListener('click', async () => {
+  if (isProcessing) return;
+  statusTyping.textContent = 'READING CLIPBOARD...';
+  try {
+    const res = await fetch(API_BASE + '/api/os/clipboard?session_id=' + encodeURIComponent(sessionId));
+    const data = await res.json();
+    if (data.status === 'success' && data.text) {
+      userInput.value = `[บริบทจากคลิปบอร์ด]: ${data.text}\n\n`;
+      userInput.focus();
+    } else if (data.status === 'success') {
+      enterChatMode();
+      addMessage('jarvis', 'คลิปบอร์ดของท่านว่างเปล่าครับ');
+    } else {
+      enterChatMode();
+      addMessage('jarvis', data.message || 'ไม่สามารถอ่านคลิปบอร์ดได้ครับ');
+    }
+  } catch (err) {
+    enterChatMode();
+    addMessage('jarvis', 'ไม่สามารถเชื่อมต่อ Backend เพื่ออ่านคลิปบอร์ดได้ครับ');
+  }
+  statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+});
+
+async function loadChatHistory() {
+  try {
+    const res = await fetch(API_BASE + '/api/chat/history?session_id=' + encodeURIComponent(sessionId));
+    const data = await res.json();
+    if (data.history && data.history.length > 0) {
+      enterChatMode();
+      chatLog.innerHTML = '';
+      data.history.forEach(msg => {
+        addMessage(msg.role, msg.content);
+      });
+    }
+  } catch (err) {
+    console.error("Failed to load chat history:", err);
+  }
+}
+
+// ===== SPEECH TO TEXT (Web Speech API) =====
+async function initJarvis() {
+  initRealTimeEnvironment();
+  fetchSystemStatus();
+  fetchHealth();
+  fetchSensors();
+  fetchSystemLog();
+  await fetchAuthStatus();
+  loadChatHistory();
+
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition(); // module-level var (declared near speakText)
+    recognition.lang = 'th-TH';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = function() {
+      micBtn.classList.add('active');
+      reactorCore.classList.add('listening');
+      statusTyping.textContent = 'LISTENING...';
+    };
+
+    recognition.onresult = function(event) {
+      const transcript = event.results[0][0].transcript;
+      userInput.value = '';
+      clearSilenceTimers(); // the user just responded — the 20s/30s deadline no longer applies
+
+      if (voiceConversationActive && isVoiceEndPhrase(transcript)) {
+        // User said something like "พอแล้ว" / "จบการสนทนา" — end the voice session,
+        // no need to bother the AI backend with it.
+        endVoiceConversation('รับทราบครับ จบการสนทนาด้วยเสียงแล้วครับ');
+        return;
+      }
+      // Voice conversation: stays on the dashboard (no chat-active docking),
+      // and after JARVIS replies + speaks, listening resumes automatically.
+      processInput(transcript, { viaVoice: true });
+    };
+
+    recognition.onerror = function(event) {
+      console.error("Speech recognition error", event.error);
+      micBtn.classList.remove('active');
+      reactorCore.classList.remove('listening');
+      if (!voiceConversationActive) return;
+      if (voiceSoftStopped) return; // already soft-stopped at 20s; just wait for the 30s timer or the user
+      if (event.error === 'no-speech') {
+        // Browser's own short no-speech timeout — our 20s/30s timers are the real
+        // deadline, so just keep listening quietly instead of ending the session.
+        try { recognition.start(); } catch (e) {}
+        return;
+      }
+      // A real problem (mic permission denied, network, ...) — end the session.
+      endVoiceConversation(null);
+    };
+
+    recognition.onend = function() {
+      micBtn.classList.remove('active');
+      reactorCore.classList.remove('listening');
+    };
+
+    // Click once to start a hands-free voice conversation; click again to end it.
+    micBtn.addEventListener('click', () => {
+      if (voiceConversationActive) {
+        endVoiceConversation(null); // manual stop — no spoken farewell needed
+      } else {
+        voiceConversationActive = true;
+        try { recognition.start(); } catch (e) {}
+        startSilenceWatch();
+      }
+    });
+  } else {
+    micBtn.style.display = 'none'; // Hide if not supported
+    console.warn("Speech Recognition API not supported in this browser.");
+  }
+
+  // Click on the mini J.A.R.V.I.S. orb to return to the dashboard
+  document.getElementById('arc-reactor').addEventListener('click', () => {
+    const mi = document.getElementById('main-interface');
+    if (mi && mi.classList.contains('chat-active')) {
+      mi.classList.remove('chat-active');
+      scrollChat(true);
+    }
+  });
+}
+
+// ===== Background particle network (uses the previously-empty #bg-canvas) =====
+(function initBgCanvas() {
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let w = 0, h = 0, particles = [];
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+  function build() {
+    const count = Math.min(80, Math.floor((w * h) / 24000));
+    particles = Array.from({ length: count }, () => ({
+      x: Math.random() * w, y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3
+    }));
+  }
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > w) p.vx *= -1;
+      if (p.y < 0 || p.y > h) p.vy *= -1;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 217, 255, 0.55)';
+      ctx.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 130) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = 'rgba(0, 217, 255, ' + (0.12 * (1 - dist / 130)) + ')';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  resize();
+  build();
+  window.addEventListener('resize', () => { resize(); build(); });
+  draw();
+})();
+</script>
+</body>
+</html>
