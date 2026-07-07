@@ -372,6 +372,7 @@
     color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 13px; letter-spacing: 0.5px;
     transition: all 0.15s ease;
   }
+  .profile-menu-item[hidden] { display: none; }
   .profile-menu-item i { width: 16px; color: var(--cyan); }
   .profile-menu-item:hover { background: rgba(0, 217, 255, 0.12); }
   .profile-menu-item.danger i { color: var(--red); }
@@ -524,6 +525,10 @@
     padding: 20px;
     position: relative;
     min-height: 0;   /* critical: lets .chat-log flex/scroll instead of growing */
+    min-width: 0;    /* grid items default to min-width:auto — without this, content
+                        (e.g. the flex-shrink:0 input row in chat-active) forces the
+                        1fr column past the viewport on narrow/phone widths instead
+                        of shrinking to fit it */
   }
   
   /* Arc Reactor */
@@ -1112,9 +1117,67 @@
     }
     .panel-left, .panel-right { display: none; }
     .panel-center { grid-column: 1; }
+    /* chat-active's grid-template-columns becomes 0px 1fr 0px (see below) —
+       without this, panel-center stays pinned to the collapsed 0px column 1
+       and every chat bubble renders as a near-zero-width sliver. */
+    #main-interface.chat-active .panel-center { grid-column: 2; }
     .hud-top { flex-wrap: wrap; gap: 6px; }
     .arc-reactor-wrap { width: 200px; height: 200px; }
     .arc-reactor { transform: scale(0.7); }
+  }
+
+  /* ===== PHONE FALLBACK (real phone widths, not just narrow windows) ===== */
+  @media (max-width: 480px) {
+    #main-interface { padding: 6px; gap: 6px; }
+    .panel-center { padding: 12px 8px; }
+
+    /* Boot screen: the 64px title + 8px letter-spacing overflows a phone width */
+    .boot-title { font-size: 30px; letter-spacing: 3px; }
+    .boot-subtitle { font-size: 9px; letter-spacing: 2px; margin-bottom: 22px; }
+    .boot-log { font-size: 10px; height: 130px; margin-bottom: 18px; }
+    .boot-percent { font-size: 12px; }
+
+    /* Top HUD: logo/status/shield/clock/profile all fighting for one row.
+       space-between stretches whichever 2 items share a wrapped line clear
+       past the viewport edge — flex-start + an explicit gap avoids that. */
+    .hud-top { padding: 0 8px; justify-content: flex-start; gap: 8px 10px; }
+    .hud-logo { font-size: 13px; letter-spacing: 1px; }
+    .hud-status { font-size: 9px; gap: 5px; }
+    .security-shield { padding: 4px 8px; font-size: 9px; gap: 5px; }
+    .security-shield i { font-size: 12px; }
+    #security-shield-text { display: none; }  /* icon color already conveys state; text just crowds the row */
+    .hud-date { display: none; }              /* redundant with the boss's own phone clock; time stays */
+    .hud-time { font-size: 15px; letter-spacing: 1px; }
+    .hud-user { padding: 5px 8px; gap: 6px; }
+    .hud-user span { font-size: 11px; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-menu { width: min(220px, 78vw); }
+
+    /* Idle arc reactor */
+    .arc-reactor-wrap { width: 140px; height: 140px; }
+    .arc-reactor { transform: scale(0.48); }
+
+    /* Chat + input */
+    .chat-log { height: 150px; font-size: 13px; padding: 8px; }
+    .input-area { padding: 6px; gap: 6px; }
+    #user-input { font-size: 14px; padding: 6px 8px; }
+    .input-btn { width: 34px; height: 34px; font-size: 14px; }
+
+    /* Footer: 3 items no longer fit one line on a phone */
+    .hud-bottom { font-size: 9px; padding: 0 10px; flex-wrap: wrap; gap: 2px 10px; justify-content: center; text-align: center; }
+    .hud-bottom > div:nth-child(2) { display: none; }  /* drop the version/branding line, keep GEO + STATUS */
+
+    /* Chat-focus mode: the docked orb's gutter ate half the screen at desktop sizing */
+    #main-interface.chat-active .panel-center { padding: 10px 10px 10px 88px; }
+    #main-interface.chat-active .arc-reactor-wrap { width: 66px; height: 66px; left: 8px; bottom: 62px; }
+    #main-interface.chat-active .arc-reactor { transform: scale(0.24); }
+
+    /* Full-screen overlays: less padding, smaller headline text */
+    .lockdown-icon { font-size: 54px; margin-bottom: 14px; }
+    .lockdown-title { font-size: 20px; letter-spacing: 2px; }
+    .lockdown-msg { font-size: 13px; }
+    .lockdown-override-row { flex-direction: column; }
+    .auth-panel { padding: 18px 16px; }
+    .admin-head, .admin-section { padding: 12px 14px; }
   }
 </style>
 </head>
@@ -2203,6 +2266,10 @@ async function apiJSON(url, opts) {
 let adminPanelInterval = null;
 
 function openAdminPanel() {
+  if (!isAdmin) {
+    addMessage('jarvis', '🚫 ต้องเข้าสู่ระบบด้วยสิทธิ์แอดมินก่อนครับ');
+    return;
+  }
   adminOverlay.hidden = false;
   loadAdminData();
   if (adminPanelInterval) clearInterval(adminPanelInterval);
