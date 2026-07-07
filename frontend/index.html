@@ -1406,6 +1406,10 @@
         <div class="admin-stat"><span class="admin-stat-k">KB FILES</span><span class="admin-stat-v" id="ap-kbfiles">--</span></div>
         <div class="admin-stat"><span class="admin-stat-k">KB CHARS</span><span class="admin-stat-v" id="ap-kbchars">--</span></div>
       </div>
+      <select id="ai-model-select" class="w-full mt-2 bg-jvcyan/[0.06] border border-jvcyan/25 text-jvcyan text-[11px] font-techmono py-1.5 px-1.5 rounded-sm cursor-pointer outline-none">
+        <option value="">-- เปลี่ยนโมเดลหลัก --</option>
+      </select>
+      <div id="ai-model-switch-msg" class="text-[10px] font-techmono mt-1"></div>
     </div>
 
     <!-- Security monitor -->
@@ -1662,6 +1666,51 @@ async function fetchHealth() {
   }
   document.getElementById('ai-session').textContent = String(sessionId || '').slice(0, 8);
 }
+
+// ===== MODEL SWITCH DROPDOWN (admin-only, calls /api/models + /api/models/switch) =====
+const modelSelect = document.getElementById('ai-model-select');
+const modelSwitchMsg = document.getElementById('ai-model-switch-msg');
+async function loadModelOptions() {
+  try {
+    const res = await fetch(API_BASE + '/api/models');
+    const data = await res.json();
+    const current = modelSelect.value;
+    modelSelect.innerHTML = (data.models || []).map(m => {
+      const label = m.configured ? `${m.name.toUpperCase()} (${m.label})` : `${m.name.toUpperCase()} — ยังไม่ได้ตั้งค่า`;
+      const activeMark = m.active ? ' ✅' : '';
+      return `<option value="${m.name}" ${m.configured ? '' : 'disabled'} ${m.active ? 'selected' : ''}>${label}${activeMark}</option>`;
+    }).join('');
+  } catch (err) {
+    console.error("Cannot fetch model list", err);
+  }
+}
+modelSelect.addEventListener('change', async () => {
+  const chosen = modelSelect.value;
+  if (!chosen) return;
+  modelSwitchMsg.textContent = 'กำลังเปลี่ยน...';
+  modelSwitchMsg.style.color = 'var(--jvdim, #7a8a99)';
+  try {
+    const res = await fetch(API_BASE + '/api/models/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, model: chosen }),
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      modelSwitchMsg.style.color = 'var(--jvcyan, #2de6ff)';
+      modelSwitchMsg.textContent = `เปลี่ยนเป็น ${chosen.toUpperCase()} แล้ว`;
+      fetchHealth();
+      loadModelOptions();
+    } else {
+      modelSwitchMsg.style.color = 'var(--red, #ff4d4d)';
+      modelSwitchMsg.textContent = data.message || 'เปลี่ยนไม่สำเร็จ';
+      loadModelOptions();
+    }
+  } catch (err) {
+    modelSwitchMsg.style.color = 'var(--red, #ff4d4d)';
+    modelSwitchMsg.textContent = 'เชื่อมต่อไม่ได้';
+  }
+});
 
 // ===== SENSORS (real machine telemetry from backend /api/system-sensors) =====
 async function fetchSensors() {
@@ -2291,6 +2340,7 @@ function openAdminPanel() {
   }
   adminOverlay.hidden = false;
   loadAdminData();
+  loadModelOptions();
   if (adminPanelInterval) clearInterval(adminPanelInterval);
   adminPanelInterval = setInterval(loadAdminData, 3000);
 }
