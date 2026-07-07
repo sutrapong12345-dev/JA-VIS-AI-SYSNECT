@@ -289,6 +289,21 @@
   .lockdown-msg { font-family: 'Rajdhani', sans-serif; font-size: 17px; color: var(--text); max-width: 560px; line-height: 1.6; margin-bottom: 20px; }
   .lockdown-timer { font-family: 'Share Tech Mono', monospace; font-size: 15px; color: var(--gold); letter-spacing: 2px; }
   .lockdown-reason { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); margin-top: 18px; }
+  .lockdown-override-row { display: flex; gap: 8px; margin-top: 24px; width: min(380px, 90vw); }
+  .lockdown-override-input {
+    flex: 1; padding: 10px 14px; background: rgba(0, 20, 40, 0.7);
+    border: 1px solid var(--border-bright); color: var(--text);
+    font-family: 'Share Tech Mono', monospace; font-size: 13px; outline: none; user-select: text;
+  }
+  .lockdown-override-input:focus { border-color: var(--red); box-shadow: 0 0 10px rgba(255,59,59,0.3); }
+  .lockdown-override-btn {
+    cursor: pointer; padding: 10px 16px; white-space: nowrap;
+    background: rgba(255,59,59,0.15); border: 1px solid var(--red); color: var(--red);
+    font-family: 'Rajdhani', sans-serif; font-size: 13px; letter-spacing: 0.5px; transition: all 0.15s ease;
+  }
+  .lockdown-override-btn:hover { background: rgba(255,59,59,0.3); }
+  .lockdown-override-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .lockdown-override-msg { font-family: 'Share Tech Mono', monospace; font-size: 12px; margin-top: 10px; min-height: 16px; }
 
   .hud-time {
     font-family: 'Orbitron', sans-serif;
@@ -1393,6 +1408,12 @@
     กรุณารอจนกว่าระบบจะกลับมาออนไลน์อีกครั้ง
   </div>
   <div class="lockdown-timer" id="lockdown-timer"></div>
+  <div class="lockdown-override-row" id="lockdown-override-row">
+    <input id="lockdown-override-input" class="lockdown-override-input" type="password"
+           placeholder="Security Code (Superadmin) — ปลดล็อกทันที" autocomplete="off">
+    <button id="lockdown-override-btn" class="lockdown-override-btn"><i class="fas fa-unlock"></i> ปลดล็อก</button>
+  </div>
+  <div class="lockdown-override-msg" id="lockdown-override-msg"></div>
   <div class="lockdown-reason" id="lockdown-reason"></div>
 </div>
 
@@ -1649,6 +1670,7 @@ function applySecurityState(state, sec) {
   }
 
   // Full-screen lockdown / offline overlay
+  const overrideRow = document.getElementById('lockdown-override-row');
   if (state === 'LOCKDOWN' || state === 'OFFLINE') {
     overlay.hidden = false;
     const msg = document.getElementById('lockdown-msg');
@@ -1659,12 +1681,19 @@ function applySecurityState(state, sec) {
       msg.innerHTML = 'ไม่สามารถเชื่อมต่อระบบหลังบ้านได้ครับ<br>กำลังพยายามเชื่อมต่อใหม่อัตโนมัติ กรุณารอสักครู่...';
       timer.textContent = '⏳ กำลังเชื่อมต่อใหม่...';
       reason.textContent = '';
+      overrideRow.style.display = 'none'; // no point trying — the backend can't even respond
     } else {
       document.querySelector('.lockdown-title').textContent = 'SECURITY LOCKDOWN';
-      msg.innerHTML = 'ตรวจพบภัยคุกคามด้านความปลอดภัย ระบบได้ปิดการทำงานหลังบ้านชั่วคราวเพื่อป้องกันข้อมูลครับ<br>กรุณารอจนกว่าระบบจะกลับมาออนไลน์อีกครั้ง';
-      const remain = sec && sec.seconds_remaining ? sec.seconds_remaining : 0;
-      timer.textContent = remain > 0 ? `🛡️ ระบบจะกลับมาออนไลน์ในอีก ${remain} วินาที` : '🛡️ กำลังตรวจสอบความปลอดภัย...';
-      reason.textContent = sec && sec.last_reason ? ('สาเหตุ: ' + sec.last_reason) : '';
+      overrideRow.style.display = 'flex';
+      if (sec && sec.indefinite) {
+        msg.innerHTML = 'ตรวจพบการโจมตีซ้ำ (repeat offense) ระบบล็อกดาวน์ค้างไว้<b>ถาวร</b>เพื่อความปลอดภัยครับ<br>ต้องปลดล็อกด้วยมือเท่านั้น (ล็อกอินแอดมินเดิม หรือ Security Code ด้านล่าง)';
+        timer.textContent = '🔒 ล็อกดาวน์ถาวร — รอการปลดล็อกจากแอดมิน';
+      } else {
+        msg.innerHTML = 'ตรวจพบภัยคุกคามด้านความปลอดภัย ระบบได้ปิดการทำงานหลังบ้านชั่วคราวเพื่อป้องกันข้อมูลครับ<br>กรุณารอจนกว่าระบบจะกลับมาออนไลน์อีกครั้ง หรือปลดล็อกด้วย Security Code ด้านล่าง';
+        const remain = sec && sec.seconds_remaining ? sec.seconds_remaining : 0;
+        timer.textContent = remain > 0 ? `🛡️ ระบบจะกลับมาออนไลน์ในอีก ${remain} วินาที` : '🛡️ กำลังตรวจสอบความปลอดภัย...';
+      }
+      reason.textContent = sec && sec.last_reason ? ('สาเหตุ: ' + sec.last_reason + (sec.lockdown_count ? ` (ครั้งที่ ${sec.lockdown_count})` : '')) : '';
     }
   } else {
     overlay.hidden = true;
@@ -1682,6 +1711,44 @@ async function fetchSecurityStatus() {
     applySecurityState('OFFLINE', null);
   }
 }
+
+// Submit the Superadmin Security Code directly from the lockdown overlay —
+// this is the break-glass path that works even with NO prior admin session
+// (regular login is blocked while locked down, by design).
+async function submitLockdownOverride() {
+  const input = document.getElementById('lockdown-override-input');
+  const btn = document.getElementById('lockdown-override-btn');
+  const msgEl = document.getElementById('lockdown-override-msg');
+  const code = input.value.trim();
+  if (!code) { input.focus(); return; }
+  btn.disabled = true;
+  msgEl.style.color = 'var(--text-dim)';
+  msgEl.textContent = 'กำลังตรวจสอบ...';
+  try {
+    const res = await fetch(API_BASE + '/api/security/clear', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, override_code: code })
+    });
+    const d = await res.json();
+    if (d.status === 'ok') {
+      msgEl.style.color = 'var(--green)';
+      msgEl.textContent = '✅ ปลดล็อกสำเร็จ! กำลังกลับสู่ระบบ...';
+      input.value = '';
+      await fetchSecurityStatus();
+    } else {
+      msgEl.style.color = 'var(--red)';
+      msgEl.textContent = d.message || 'รหัสไม่ถูกต้องครับ';
+    }
+  } catch (e) {
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = 'เชื่อมต่อไม่ได้ครับ';
+  }
+  btn.disabled = false;
+}
+document.getElementById('lockdown-override-btn').addEventListener('click', submitLockdownOverride);
+document.getElementById('lockdown-override-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) submitLockdownOverride();
+});
 
 // Fetch stats every 3 seconds; AI engine info every 30 seconds; sensors/log every 5 seconds
 setInterval(fetchSystemStatus, 3000);

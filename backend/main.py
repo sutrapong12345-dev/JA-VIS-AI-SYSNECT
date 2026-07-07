@@ -151,6 +151,14 @@ class Settings:
     admin_username: str = os.getenv("ADMIN_USERNAME", "sutrapongadmin")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "")  # empty = login disabled
 
+    # Superadmin security override code — a SEPARATE secret (not the login
+    # password) that can lift a security lockdown even without an existing
+    # authenticated session. Deliberately decoupled from admin_password: login
+    # itself is blocked during lockdown by design, so this is the break-glass
+    # path. Empty = feature disabled (lockdown can only be cleared by a session
+    # that was already admin before the lockdown engaged).
+    security_override_code: str = os.getenv("SECURITY_OVERRIDE_CODE", "")
+
     # Anthropic / Claude
     claude_api_key: str = os.getenv("CLAUDE_API_KEY", "")
     # Kept at the original model to preserve existing behavior. Note: this ID is
@@ -379,6 +387,7 @@ def client_ip(http_request: Request) -> str:
 
 login_rate_limiter = RateLimiter(max_attempts=5, window_seconds=300)   # 5 tries / 5 min / IP
 chat_rate_limiter = RateLimiter(max_attempts=30, window_seconds=60)    # 30 msgs / 1 min / IP
+security_override_rate_limiter = RateLimiter(max_attempts=5, window_seconds=300)  # 5 tries / 5 min / IP
 
 
 # --------------------------------------------------------------------------- #
@@ -404,15 +413,39 @@ class SecurityMonitor:
         self._warn = int(os.getenv("SEC_WARN_THRESHOLD", "5"))
         self._lockdown = int(os.getenv("SEC_LOCKDOWN_THRESHOLD", "10"))
         self._window = int(os.getenv("SEC_WINDOW_SECONDS", "120"))
-        self._cooldown = int(os.getenv("SEC_LOCKDOWN_SECONDS", "60"))
+        self._cooldown = int(os.getenv("SEC_LOCKDOWN_SECONDS", "600"))  # 10 minutes
         self._events: deque = deque(maxlen=200)   # (ts, kind, severity, ip, detail)
         self._lock = threading.Lock()
         self._lockdown_until = 0.0
+        self._indefinite = False   # repeat-offense: sealed until a human manually clears it, no auto-recovery
+        self._lockdown_count = 0   # how many times a lockdown has EVER engaged this process's lifetime
         self._last_reason = ""
 
     def _score_locked(self) -> int:
         cutoff = time.time() - self._window
         return sum(sev for (ts, _k, sev, _ip, _d) in self._events if ts >= cutoff)
+
+    def _currently_locked_locked(self) -> bool:
+        """Caller must hold self._lock."""
+        return self._indefinite or time.time() < self._lockdown_until
+
+    def _engage_locked(self, reason: str) -> None:
+        """Caller must hold self._lock. Escalates: 1st lockdown ever = timed
+        cooldown; 2nd+ (a REPEAT offense, even across earlier manual clears) =
+        indefinite, requiring a human (admin session or Superadmin override code)
+        to lift it — no auto-recovery, since repeated attacks are a much
+        stronger signal than a one-off spike."""
+        self._lockdown_count += 1
+        self._last_reason = reason
+        if self._lockdown_count >= 2:
+            self._indefinite = True
+            self._lockdown_until = 0.0
+            log.critical("🛑 SECURITY LOCKDOWN #%d ENGAGED (%s) — REPEAT OFFENSE: sealed INDEFINITELY until manually cleared",
+                         self._lockdown_count, reason)
+        else:
+            self._lockdown_until = time.time() + self._cooldown
+            log.critical("🛑 SECURITY LOCKDOWN #%d ENGAGED (%s) — backend sealed for %ds",
+                         self._lockdown_count, reason, self._cooldown)
 
     def record(self, kind: str, ip: str = "unknown", detail: str = "") -> None:
         sev = self._SEVERITY.get(kind, 1)
@@ -420,32 +453,33 @@ class SecurityMonitor:
             self._events.append((time.time(), kind, sev, ip, detail[:120]))
             score = self._score_locked()
             log.warning("SECURITY event '%s' (sev %d, ip=%s) score=%d/%d", kind, sev, ip, score, self._lockdown)
-            if score >= self._lockdown and time.time() >= self._lockdown_until:
-                self._lockdown_until = time.time() + self._cooldown
-                self._last_reason = f"{kind} (score {score})"
-                log.critical("🛑 SECURITY LOCKDOWN ENGAGED (%s) — backend sealed for %ds", self._last_reason, self._cooldown)
+            if score >= self._lockdown and not self._currently_locked_locked():
+                self._engage_locked(f"{kind} (score {score})")
 
     def is_locked_down(self) -> bool:
         with self._lock:
-            return time.time() < self._lockdown_until
+            return self._currently_locked_locked()
 
     def engage_manual(self, reason: str = "manual") -> None:
         with self._lock:
-            self._lockdown_until = time.time() + self._cooldown
-            self._last_reason = reason
-            log.critical("🛑 SECURITY LOCKDOWN engaged manually (%s)", reason)
+            self._engage_locked(reason)
 
     def clear(self) -> None:
+        """Lifts the CURRENT lockdown. Deliberately does NOT reset
+        `_lockdown_count` — the repeat-offense escalation persists for the rest
+        of this process's life so a second real attack later still seals hard,
+        even if this one turned out to be a false alarm."""
         with self._lock:
             self._lockdown_until = 0.0
+            self._indefinite = False
             self._events.clear()
-            log.warning("Security lockdown cleared manually; threat history reset")
+            log.warning("Security lockdown cleared; threat history reset (lifetime lockdown count stays at %d)", self._lockdown_count)
 
     def status(self) -> Dict[str, object]:
         with self._lock:
             now = time.time()
             score = self._score_locked()
-            locked = now < self._lockdown_until
+            locked = self._currently_locked_locked()
             if locked:
                 state = "LOCKDOWN"
             elif score >= self._warn:
@@ -464,10 +498,13 @@ class SecurityMonitor:
                 "warn_threshold": self._warn,
                 "lockdown_threshold": self._lockdown,
                 "locked_down": locked,
-                "seconds_remaining": max(0, int(self._lockdown_until - now)) if locked else 0,
+                "indefinite": self._indefinite,
+                "lockdown_count": self._lockdown_count,
+                "seconds_remaining": (max(0, int(self._lockdown_until - now)) if (locked and not self._indefinite) else 0),
                 "last_reason": self._last_reason,
                 "recent_events": recent[-10:],
                 "window_seconds": self._window,
+                "cooldown_seconds": self._cooldown,
             }
 
 
@@ -1656,6 +1693,7 @@ def get_system_log():
 
 class SecurityRequest(BaseModel):
     session_id: str = "default"
+    override_code: str = ""  # Superadmin break-glass code — works even without a prior admin session
 
 
 @app.get("/api/security/status")
@@ -1666,12 +1704,33 @@ def security_status():
 
 
 @app.post("/api/security/clear")
-def security_clear(request: SecurityRequest):
-    """Lift an active lockdown early. Only an already-authenticated admin session
-    (from before the lockdown) can do this; new logins are blocked while locked."""
-    if not store.is_admin(request.session_id or "default"):
-        return {"status": "error", "message": "🚫 ต้องเป็นแอดมินที่ยืนยันตัวตนแล้วเท่านั้นครับ"}
+def security_clear(request: SecurityRequest, http_request: Request):
+    """Lift an active lockdown early. Two ways in: (1) an already-authenticated
+    admin session (from before the lockdown — logins are blocked WHILE locked,
+    by design), or (2) the separate Superadmin SECURITY_OVERRIDE_CODE, which
+    works even with no prior session — the break-glass path for when nobody
+    was logged in when the lockdown engaged."""
+    ip = client_ip(http_request)
+    is_admin_session = store.is_admin(request.session_id or "default")
+
+    override_ok = False
+    if request.override_code:
+        if not security_override_rate_limiter.check(ip):
+            wait = security_override_rate_limiter.retry_after(ip)
+            log.warning("Security override code rate-limited (ip=%s, retry in %ds)", ip, wait)
+            return {"status": "error", "message": f"ลองรหัส Security Code บ่อยเกินไปครับ กรุณารออีก {wait} วินาที"}
+        override_ok = bool(settings.security_override_code) and hmac.compare_digest(
+            request.override_code.encode("utf-8"), settings.security_override_code.encode("utf-8")
+        )
+        if not override_ok:
+            log.warning("Security override code REJECTED (ip=%s)", ip)
+
+    if not (is_admin_session or override_ok):
+        return {"status": "error", "message": "🚫 ต้องเป็นแอดมินที่ยืนยันตัวตนแล้ว หรือใส่ Security Code (Superadmin) ให้ถูกต้องครับ"}
+
     security_monitor.clear()
+    log.warning("Security lockdown cleared (session=%s..., via_override_code=%s, ip=%s)",
+                (request.session_id or "default")[:8], override_ok, ip)
     return {"status": "ok", "message": "✅ ยกเลิกการล็อกดาวน์และรีเซ็ตประวัติภัยคุกคามแล้วครับ", **security_monitor.status()}
 
 
