@@ -1286,21 +1286,9 @@
     </div>
 
     <div class="panel">
-      <div class="panel-title">QUICK COMMANDS</div>
-      <div class="flex flex-wrap gap-[5px] mt-1.5">
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="SYSNECT คือบริษัทอะไร ทำอะไรบ้าง">SYSNECT คือ?</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="ระบบ Ticket ของ SYSNECT ทำงานอย่างไร มีสถานะอะไรบ้าง">ระบบ Ticket</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="จะแจ้งปัญหา IT ได้อย่างไร">แจ้งปัญหา IT</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="ช่วยร่างอีเมลแจ้งลูกค้าให้หน่อย">✉️ ร่างอีเมล</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="ช่วยสรุปงานและสรุปข้อมูลให้ฉันหน่อย">📝 สรุปข้อมูล</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="สแกนสถานะระบบคอมพิวเตอร์ตอนนี้">🖥️ สแกนระบบ</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="เปิดโปรแกรม Notepad ให้หน่อย">📂 เปิดโปรแกรม</div>
-        <div class="cmd-chip px-2 py-1 bg-jvcyan/[0.08] border border-jvcyan/25 text-jvcyan text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvcyan/20 hover:border-jvcyan" data-cmd="[save log data]">💾 เซฟประวัติแชท</div>
-        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-fill="[สอน] ">🧠 สอน JARVIS</div>
-        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-cmd="[ความรู้]">📚 ความรู้ที่สอน</div>
-        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-cmd="[สร้างชุดฝึก]">🎓 สร้างชุดฝึก</div>
-        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-cmd="[รายการโมเดล]">📋 รายการโมเดล</div>
-        <div class="cmd-chip px-2 py-1 bg-jvgold/[0.08] border border-jvgold/25 text-jvgold text-[10px] font-techmono cursor-pointer transition-all duration-200 hover:bg-jvgold/20 hover:border-jvgold" data-fill="[เปลี่ยนโมเดล: ]">🔄 เปลี่ยนโมเดล</div>
+      <div class="panel-title">TOKEN STATUS <span class="badge">DAILY</span></div>
+      <div id="token-status-list">
+        <div class="metric"><div class="metric-head"><span class="metric-name">กำลังโหลด...</span></div></div>
       </div>
     </div>
   </aside>
@@ -1482,7 +1470,7 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = 'https://tuner-euros-creature-towers.trycloudflare.com';
+const API_BASE = 'https://desktop-delaware-machines-appraisal.trycloudflare.com';
 
 // ===== BOOT SEQUENCE =====
 const bootMessages = [
@@ -1691,6 +1679,35 @@ async function fetchSensors() {
   }
 }
 
+// ===== TOKEN STATUS (real per-provider usage counters from /api/token-status) =====
+const TOKEN_STATUS_LABELS = { claude: 'CLAUDE', gemini: 'GEMINI', groq: 'GROQ', ollama: 'OLLAMA' };
+async function fetchTokenStatus() {
+  try {
+    const res = await fetch(API_BASE + '/api/token-status');
+    const data = await res.json();
+    const providers = data.providers || {};
+    const order = ['gemini', 'groq', 'claude', 'ollama'];
+    const html = order.filter(name => providers[name]).map(name => {
+      const p = providers[name];
+      const label = TOKEN_STATUS_LABELS[name] || name.toUpperCase();
+      if (!p.configured) {
+        return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">ไม่ได้ตั้งค่า</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
+      }
+      if (p.percent === null || p.percent === undefined) {
+        const note = name === 'ollama' ? 'ไม่จำกัด (ในเครื่อง)' : 'ไม่มีลิมิตรายวัน';
+        return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">${p.tokens_today.toLocaleString()} token · ${note}</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
+      }
+      const unit = p.cap_metric === 'requests' ? 'คำขอ' : 'token';
+      const used = p.cap_metric === 'requests' ? p.requests_today : p.tokens_today;
+      const barColor = p.percent >= 90 ? 'background:#ff4d4d;' : (p.percent >= 70 ? 'background:#ffb020;' : '');
+      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${p.percent}%)</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
+    }).join('');
+    document.getElementById('token-status-list').innerHTML = html || '<div class="log-empty">ไม่มีข้อมูล</div>';
+  } catch (err) {
+    console.error("Cannot fetch token status", err);
+  }
+}
+
 // ===== SYSTEM LOG (real backend log lines from /api/system-log) =====
 async function fetchSystemLog() {
   try {
@@ -1819,6 +1836,8 @@ setInterval(fetchHealth, 30000);
 setInterval(fetchSensors, 5000);
 setInterval(fetchSystemLog, 5000);
 setInterval(fetchSecurityStatus, 3000);  // security posture polled every 3s
+fetchTokenStatus();
+setInterval(fetchTokenStatus, 10000);
 
 // ===== SESSION ID (isolates conversation memory per client) =====
 let sessionId = localStorage.getItem('jarvis_session_id');
