@@ -1853,6 +1853,38 @@ def get_token_status_endpoint():
     return get_token_status()
 
 
+@app.get("/api/models")
+def list_models_endpoint():
+    """JSON list of providers (configured status, model label) + which one
+    is active — powers the model-switch dropdown in the AI ENGINE panel."""
+    models = [
+        {
+            "name": name,
+            "label": _provider_model_label(name),
+            "configured": _provider_configured(name),
+            "active": settings.active_ai == name,
+        }
+        for name in _MODEL_DISPLAY_ORDER
+    ]
+    return {"active_ai": settings.active_ai, "models": models}
+
+
+class ModelSwitchRequest(BaseModel):
+    session_id: str = "default"
+    model: str = ""
+
+
+@app.post("/api/models/switch")
+def switch_model_endpoint(request: ModelSwitchRequest):
+    """Switch the active AI model from the web UI — same admin-only,
+    global-effect switch as the `[เปลี่ยนโมเดล: ...]` chat command, just
+    reachable from a dropdown instead of typed text."""
+    if not store.is_admin(request.session_id or "default"):
+        return {"status": "error", "message": "🚫 การเปลี่ยนโมเดล AI สงวนไว้สำหรับผู้ดูแลระบบครับ"}
+    reply = switch_active_model(request.model)
+    return {"status": "ok", "message": reply, "active_ai": settings.active_ai}
+
+
 class SecurityRequest(BaseModel):
     session_id: str = "default"
     override_code: str = ""  # Superadmin break-glass code — works even without a prior admin session
