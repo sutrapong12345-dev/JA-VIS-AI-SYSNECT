@@ -742,6 +742,46 @@
     border-top: 1px dashed var(--border);
     margin: 8px 0;
   }
+  /* ===== Markdown tables (rendered from | pipe | tables |) ===== */
+  .chat-msg .text .md-table-wrap { overflow-x: auto; margin: 8px 0; }
+  .chat-msg .text table.md-table {
+    border-collapse: collapse; width: 100%; font-size: 0.92em;
+    font-family: 'Rajdhani', sans-serif;
+  }
+  .chat-msg .text table.md-table th,
+  .chat-msg .text table.md-table td {
+    border: 1px solid var(--border); padding: 5px 10px; text-align: left;
+    color: var(--text); white-space: nowrap;
+  }
+  .chat-msg .text table.md-table th {
+    background: rgba(0, 217, 255, 0.1); color: var(--cyan-bright); font-weight: 700;
+  }
+  .chat-msg .text table.md-table tr:nth-child(even) td { background: rgba(0, 217, 255, 0.03); }
+
+  /* ===== Inline bar chart (from ```chart fenced JSON blocks) =====
+     Single fixed categorical order across the whole app: cyan -> green -> gold.
+     Bars are one flat hue per series (magnitude is encoded by length, not color),
+     so a single-series chart never needs a legend. */
+  .jv-chart { margin: 8px 0; padding: 10px 12px; background: rgba(0, 15, 30, 0.5); border: 1px solid var(--border); border-radius: 4px; }
+  .jv-chart-title { color: var(--cyan-bright); font-weight: 700; font-size: 0.95em; margin-bottom: 8px; letter-spacing: 0.3px; }
+  .jv-chart-legend { display: flex; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
+  .jv-chart-legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.82em; color: var(--text-dim); }
+  .jv-chart-legend-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .jv-chart-row { display: grid; grid-template-columns: minmax(60px, 26%) 1fr; align-items: center; gap: 8px; margin: 5px 0; }
+  .jv-chart-label { font-size: 0.85em; color: var(--text-dim); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jv-chart-track { position: relative; height: 16px; background: rgba(255,255,255,0.04); border-radius: 3px; overflow: hidden; }
+  .jv-chart-fill {
+    height: 100%; border-radius: 3px; display: flex; align-items: center;
+    padding-left: 6px; box-sizing: border-box; min-width: 2px;
+    transition: width 0.4s ease;
+  }
+  .jv-chart-fill.s0 { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
+  .jv-chart-fill.s1 { background: linear-gradient(90deg, rgba(0,255,136,0.5), var(--green)); }
+  .jv-chart-fill.s2 { background: linear-gradient(90deg, rgba(255,184,0,0.5), var(--gold)); }
+  .jv-chart-value { font-size: 0.78em; color: var(--bg-primary); font-weight: 700; font-family: 'Share Tech Mono', monospace; text-shadow: 0 0 2px rgba(255,255,255,0.4); }
+  .jv-chart-group { margin: 5px 0 9px; }
+  .jv-chart-group-label { font-size: 0.85em; color: var(--text-dim); margin-bottom: 3px; }
+  .jv-chart-error { color: var(--red); font-size: 0.85em; font-family: 'Share Tech Mono', monospace; }
   .jv-cursor {
     display: inline-block;
     color: var(--cyan);
@@ -1485,7 +1525,7 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = 'https://abstracts-consolidated-dresses-programmers.trycloudflare.com';
+const API_BASE = 'https://ready-contests-preview-adrian.trycloudflare.com';
 
 // ===== BOOT SEQUENCE =====
 const bootMessages = [
@@ -1932,8 +1972,97 @@ function scrollChat(force) {
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+function unescapeHtml(s) {
+  return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+// ===== Inline bar chart -- renders a ```chart fenced JSON block =====
+// Schema: {"title":"...", "labels":["a","b"], "values":[1,2]}                 (single series)
+//      or {"title":"...", "labels":["a","b"], "series":[{"name":"X","values":[1,2]}, ...]}  (up to 3 series)
+// Fixed categorical color order app-wide: cyan -> green -> gold (never cycled/reassigned).
+const JV_CHART_COLOR_NAMES = ['cyan', 'green', 'gold'];
+function renderChart(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(unescapeHtml(rawJson));
+  } catch (e) {
+    return '<div class="jv-chart jv-chart-error">Error: invalid chart JSON</div>';
+  }
+  const labels = Array.isArray(data.labels) ? data.labels : [];
+  let series = Array.isArray(data.series) && data.series.length
+    ? data.series.slice(0, 3)
+    : [{ name: '', values: Array.isArray(data.values) ? data.values : [] }];
+  if (!labels.length || !series.some(s => Array.isArray(s.values) && s.values.length)) {
+    return '<div class="jv-chart jv-chart-error">Error: chart has no data</div>';
+  }
+  const maxVal = Math.max(1, ...series.flatMap(s => (s.values || []).map(v => Number(v) || 0)));
+  const multi = series.length > 1;
+
+  let html = '<div class="jv-chart">';
+  if (data.title) html += '<div class="jv-chart-title">' + escapeHtml(String(data.title)) + '</div>';
+  if (multi) {
+    html += '<div class="jv-chart-legend">';
+    series.forEach((s, i) => {
+      html += '<div class="jv-chart-legend-item"><span class="jv-chart-legend-swatch" style="background:var(--' + JV_CHART_COLOR_NAMES[i] + ')"></span>' + escapeHtml(s.name || ('Series ' + (i + 1))) + '</div>';
+    });
+    html += '</div>';
+  }
+  const bar = (label, raw, si) => {
+    const pct = Math.max(2, Math.round((Math.max(0, raw) / maxVal) * 100));
+    return '<div class="jv-chart-row">'
+      + '<div class="jv-chart-label" title="' + escapeHtml(String(label)) + '">' + escapeHtml(String(label)) + '</div>'
+      + '<div class="jv-chart-track"><div class="jv-chart-fill s' + si + '" style="width:' + pct + '%"><span class="jv-chart-value">' + escapeHtml(String(raw)) + '</span></div></div>'
+      + '</div>';
+  };
+  labels.forEach((label, li) => {
+    if (multi) {
+      html += '<div class="jv-chart-group"><div class="jv-chart-group-label">' + escapeHtml(String(label)) + '</div>';
+      series.forEach((s, si) => {
+        html += bar(s.name || ('S' + (si + 1)), Number((s.values || [])[li]) || 0, si);
+      });
+      html += '</div>';
+    } else {
+      html += bar(label, Number((series[0].values || [])[li]) || 0, 0);
+    }
+  });
+  html += '</div>';
+  return html;
+}
+
+// ===== Markdown pipe tables: | a | b |  /  |---|---|  /  | 1 | 2 | =====
+function renderMarkdownTables(h) {
+  return h.replace(
+    /^\|(.+)\|[ \t]*\r?\n\|[ \t:|-]+\|[ \t]*\r?\n((?:\|.*\|[ \t]*\r?\n?)+)/gm,
+    (match, headerLine, bodyLines) => {
+      const parseRow = (line) => line.split('|').slice(1, -1).map(c => c.trim());
+      // headerLine is captured WITHOUT its surrounding pipes (the regex consumes
+      // them), unlike bodyLines rows which keep theirs — re-wrap before parsing
+      // so both go through the same slice(1,-1) logic.
+      const headers = parseRow('|' + headerLine + '|');
+      const rows = bodyLines.trim().split(/\r?\n/).map(parseRow);
+      let t = '<div class="md-table-wrap"><table class="md-table"><thead><tr>';
+      headers.forEach(hd => { t += '<th>' + hd + '</th>'; });
+      t += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        t += '<tr>';
+        r.forEach(c => { t += '<td>' + c + '</td>'; });
+        t += '</tr>';
+      });
+      t += '</tbody></table></div>';
+      return t;
+    }
+  );
+}
+
 function renderMarkdown(text) {
   let h = escapeHtml(text);
+  // 0) Pull out ```chart fenced JSON blocks first, before generic code fencing
+  // gets a chance to swallow them as plain code (avoids touching that regex).
+  const jvChartBlocks = [];
+  h = h.replace(/```chart\n?([\s\S]*?)```/g, (m, code) => {
+    jvChartBlocks.push(renderChart(code));
+    return '@@JVCHART' + (jvChartBlocks.length - 1) + '@@';
+  });
   // 1) Pull code out first so no other rule (bold/bullets/<br>) mangles it
   const codeBlocks = [];
   h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
@@ -1945,7 +2074,8 @@ function renderMarkdown(text) {
     inlineCodes.push(code);
     return '\u0000I' + (inlineCodes.length - 1) + '\u0000';
   });
-  // 2) Block-level: headings (###) and horizontal rules (---)
+  // 2) Block-level: tables, headings (###) and horizontal rules (---)
+  h = renderMarkdownTables(h);
   h = h.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="md-h">$1</strong>');
   h = h.replace(/^\s*(?:[-*_]\s*){3,}$/gm, '<hr class="md-hr">');
   // 3) Inline: bold, italic, links, list bullets
@@ -1957,6 +2087,8 @@ function renderMarkdown(text) {
   // 4) Put code back, untouched
   h = h.replace(/\u0000I(\d+)\u0000/g, (m, i) => '<code>' + inlineCodes[+i] + '</code>');
   h = h.replace(/\u0000B(\d+)\u0000/g, (m, i) => '<pre><code>' + codeBlocks[+i] + '</code></pre>');
+  // 5) Put chart HTML back in (rendered once already, so no further escaping)
+  h = h.replace(/@@JVCHART(\d+)@@/g, (m, i) => jvChartBlocks[+i]);
   return h;
 }
 
@@ -1985,6 +2117,19 @@ function addMessage(role, text) {
   scrollChat(true); // a brand-new message always snaps to the bottom
   return textEl; // so streaming can update it live
 }
+
+// ===== Reminders (automation) — poll for due reminders and surface them =====
+async function pollDueReminders() {
+  try {
+    const res = await fetch(API_BASE + '/api/reminders/pending?session_id=' + encodeURIComponent(sessionId));
+    const data = await res.json();
+    for (const r of (data.due || [])) {
+      addMessage('assistant', `⏰ **ถึงเวลาแจ้งเตือนแล้วครับบอส!**\n${r.message}`);
+      if (typeof speakText === 'function') speakText(`เตือนครับบอส ${r.message}`);
+    }
+  } catch (e) { /* silent — non-critical background poll */ }
+}
+setInterval(pollDueReminders, 20000);
 
 // ===== Text-to-Speech (natural Thai voice) =====
 let jarvisVoice = null;
@@ -2807,6 +2952,10 @@ async function initJarvis() {
   fetchSystemLog();
   fetchSecurityStatus();
   await fetchAuthStatus();
+  // Admin login now expires server-side after ADMIN_SESSION_TTL_SECONDS —
+  // poll periodically so the ADMIN badge drops back to STAFF on its own
+  // instead of only updating on the next page refresh.
+  setInterval(fetchAuthStatus, 60000);
   loadChatHistory();
 
   if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
