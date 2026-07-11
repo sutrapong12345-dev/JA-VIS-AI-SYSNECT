@@ -1,14 +1,18 @@
-# J.A.R.V.I.S. — SYSNECT AI Agent
+# J.A.R.V.I.S. v10.1 — SYSNECT AI Agent
 
 ผู้ช่วย AI สำหรับงานส่วนตัวและองค์กร รองรับหลายโมเดล, streaming chat,
 ฐานความรู้พร้อม citation, RBAC, reminders, structured tools และ audit log
 แบบตรวจสอบการแก้ไขย้อนหลังได้
+
+หน้าเว็บมีศูนย์ควบคุมบทสนทนา, reconnect, session reset, responsive layout,
+Admin dashboard และ AI Quality Gate สำหรับคัดกรองข้อมูลก่อน fine-tune
 
 ## เอกสาร
 
 - [คู่มือผู้ใช้งาน](docs/USER_MANUAL_TH.md)
 - [คู่มือผู้ดูแลระบบ](docs/ADMIN_MANUAL_TH.md)
 - [Security Foundation](SECURITY_FOUNDATION.md)
+- [Training และ AI Quality](training/README.md)
 
 ## เริ่มใช้งานสำหรับนักพัฒนา
 

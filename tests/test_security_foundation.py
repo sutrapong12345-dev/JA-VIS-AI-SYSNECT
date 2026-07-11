@@ -57,6 +57,22 @@ class SecurityFoundationTests(unittest.TestCase):
         )
         self.assertEqual(other.status_code, 403)
 
+    def test_user_can_reset_only_its_bound_conversation(self):
+        session_id, token = self.issue_session()
+        main.store.add_message(session_id, "user", "temporary context")
+        response = self.client.post(
+            "/api/chat/reset",
+            headers=self.auth(token),
+            json={"session_id": session_id},
+        )
+        self.assertEqual(response.status_code, 200)
+        history = self.client.get(
+            "/api/chat/history",
+            headers=self.auth(token),
+            params={"session_id": session_id},
+        )
+        self.assertEqual(history.json()["history"], [])
+
     def test_staff_session_cannot_read_admin_logs(self):
         _, token = self.issue_session()
         response = self.client.get("/api/system-log", headers=self.auth(token))
@@ -102,6 +118,13 @@ class SecurityFoundationTests(unittest.TestCase):
         )
         self.assertIn('{"title": "..."', prompt)
         self.assertIn("[KB:company.md#chunk-1]", prompt)
+
+    def test_admin_prompt_never_grants_unrestricted_god_mode(self):
+        prompt = main.build_system_prompt("clear", "", True, "", "admin", "")
+        self.assertNotIn("GOD MODE enabled", prompt)
+        self.assertNotIn("COMPLETELY UNRESTRICTED", prompt)
+        self.assertIn("Admin status is not unlimited machine access", prompt)
+        self.assertIn("Never say an action", prompt)
 
     def test_raw_shell_is_held_for_explicit_approval(self):
         session_id = "test_shell_approval"

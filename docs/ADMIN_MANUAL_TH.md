@@ -194,7 +194,28 @@ venv\Scripts\python.exe -m unittest discover -s tests -v
 - Audit chain แสดง `valid: true`
 - CORS ยอมเฉพาะ frontend origin
 
-## 10. Coordinated Deployment
+## 10. AI Quality Gate และ Fine-tuning
+
+แผง Admin ส่วน `AI QUALITY` ใช้ตรวจข้อมูลก่อน fine-tune:
+
+1. กดตรวจคุณภาพชุดข้อมูลปัจจุบัน
+2. อ่านคะแนน จำนวนผ่าน/คัดออก และเหตุผลหลัก
+3. กดสร้างชุดฝึกใหม่ผ่าน Quality Gate
+4. ตรวจว่า train/validation ถูกสร้างและ readiness ผ่านเกณฑ์
+
+เกณฑ์มาตรฐานคือ ตัวอย่างผ่านอย่างน้อย 100 คู่ คะแนนเฉลี่ย 80/100 และอัตราผ่าน 80%
+ระบบจะไม่เริ่ม GPU training เองจากหน้าเว็บ เพื่อป้องกันงานที่ใช้ทรัพยากรสูงโดยไม่ตั้งใจ
+
+ตรวจจาก command line:
+
+```powershell
+venv\Scripts\python.exe finetune.py --check-only
+```
+
+ดูรายละเอียดทั้งหมดใน `training/README.md` ชุดข้อมูลที่สร้างจาก chat logs และรายงานคุณภาพถูก ignore จาก Git
+และต้องอยู่ในเครื่องหรือพื้นที่ข้อมูลที่องค์กรอนุมัติเท่านั้น
+
+## 11. Coordinated Deployment
 
 Frontend และ backend ต้อง deploy พร้อมกัน:
 
@@ -209,7 +230,7 @@ Frontend และ backend ต้อง deploy พร้อมกัน:
 
 หาก frontend เก่ายัง cache อยู่ให้กด `Ctrl+F5`
 
-## 11. Backup และ Recovery
+## 12. Backup และ Recovery
 
 สำรองอย่างน้อย:
 
@@ -229,7 +250,7 @@ Frontend และ backend ต้อง deploy พร้อมกัน:
 6. แก้ไขใน branch ใหม่และ deploy แบบ coordinated
 7. ห้ามลบ audit record เพื่อซ่อนเหตุการณ์
 
-## 12. ข้อห้าม Production
+## 13. ข้อห้าม Production
 
 - ห้ามใช้ Quick Tunnel เป็นช่องทางถาวร
 - ห้ามใช้ `CORS_ORIGINS=*`

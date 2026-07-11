@@ -6,30 +6,6 @@
 <title>J.A.R.V.I.S. — SYSNECT AI Agent</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-<!-- Tailwind CSS (Play CDN). preflight is disabled so Tailwind coexists with the
-     custom JARVIS CSS without resetting it. Theme tokens below mirror the design system. -->
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    corePlugins: { preflight: false },
-    theme: {
-      extend: {
-        colors: {
-          jvbg: '#030610', jvbg2: '#061226',
-          jvcyan: '#00d9ff', jvcyanb: '#7ff5ff', jvcyand: '#006a8a',
-          jvgold: '#ffb800', jvred: '#ff3b3b', jvgreen: '#00ff88',
-          jvtext: '#c8e8ff', jvdim: '#6a9bb8'
-        },
-        fontFamily: {
-          orbitron: ['Orbitron', 'sans-serif'],
-          rajdhani: ['Rajdhani', 'sans-serif'],
-          techmono: ['"Share Tech Mono"', 'monospace']
-        },
-        boxShadow: { jvglow: '0 0 15px rgba(0,217,255,0.4)' }
-      }
-    }
-  };
-</script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   
@@ -530,6 +506,38 @@
                         1fr column past the viewport on narrow/phone widths instead
                         of shrinking to fit it */
   }
+
+  /* Conversation command bar: keeps important controls discoverable instead
+     of hiding them behind chat phrases or icon-only buttons. */
+  .conversation-toolbar {
+    width: 100%; max-width: 700px; min-height: 38px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 5px 7px; margin-bottom: 8px;
+    border: 1px solid rgba(0, 217, 255, 0.16);
+    background: rgba(4, 16, 32, 0.68); backdrop-filter: blur(8px);
+  }
+  .conversation-title { min-width: 0; display: flex; align-items: center; gap: 8px; }
+  .conversation-title i { color: var(--cyan); }
+  .conversation-title-text { min-width: 0; }
+  .conversation-name { font-family: 'Orbitron', sans-serif; font-size: 10px; color: var(--cyan-bright); letter-spacing: 1px; }
+  .conversation-state { font-family: 'Share Tech Mono', monospace; font-size: 9px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conversation-actions { display: flex; gap: 5px; }
+  .toolbar-btn {
+    min-width: 32px; height: 28px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    background: rgba(0,217,255,0.06); border: 1px solid var(--border); color: var(--text-dim);
+    cursor: pointer; font-family: 'Rajdhani', sans-serif; font-size: 11px; transition: all .16s ease;
+  }
+  .toolbar-btn:hover, .toolbar-btn.active { color: var(--cyan-bright); border-color: var(--cyan); background: rgba(0,217,255,.14); }
+  .toolbar-btn.danger:hover { color: var(--red); border-color: var(--red); background: rgba(255,59,59,.12); }
+  .toolbar-btn:focus-visible, .input-btn:focus-visible, .hud-user:focus-visible, .profile-menu-item:focus-visible,
+  .admin-btn:focus-visible, .auth-btn:focus-visible { outline: 2px solid var(--cyan-bright); outline-offset: 2px; }
+  .toolbar-label { display: inline; }
+  .connection-pill { color: var(--green); }
+  .connection-pill.offline { color: var(--red); }
+  #main-interface.panels-hidden { grid-template-columns: 0 1fr 0; }
+  #main-interface.panels-hidden .panel-left, #main-interface.panels-hidden .panel-right { display: none; }
+  #main-interface.panels-hidden .panel-center { grid-column: 2; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   
   /* Arc Reactor */
   .arc-reactor-wrap {
@@ -891,7 +899,17 @@
   #reactor-visualizer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
   
   /* ===== RIGHT PANEL CONTENT ===== */
-  /* .info-row and .cmd-chip are now styled with Tailwind utilities in the markup */
+  .info-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed rgba(0,217,255,.1); font-family: 'Share Tech Mono', monospace; font-size: 11px; gap: 8px; }
+  .info-row:last-child { border-bottom: 0; }
+  .info-key, .text-dim { color: var(--text-dim); }
+  .info-value { color: var(--cyan-bright); text-align: right; overflow-wrap: anywhere; }
+  .model-select { width: 100%; margin-top: 8px; padding: 6px; cursor: pointer; outline: none; border-radius: 2px; background: rgba(0,217,255,.06); border: 1px solid rgba(0,217,255,.25); color: var(--cyan); font-family: 'Share Tech Mono', monospace; font-size: 11px; }
+  .model-select:focus { border-color: var(--cyan); }
+  .model-switch-msg { margin-top: 4px; font-family: 'Share Tech Mono', monospace; font-size: 10px; }
+  .token-model-tag { color: var(--text-dim); font-size: 8px; margin-left: 4px; }
+  .upload-file-icon { margin-right: 6px; }
+  .upload-file-icon.image { color: var(--green); }
+  .upload-file-icon.document { color: var(--cyan); }
 
   .weather-display {
     text-align: center;
@@ -1212,6 +1230,10 @@
     .input-area { padding: 6px; gap: 6px; }
     #user-input { font-size: 14px; padding: 6px 8px; }
     .input-btn { width: 34px; height: 34px; font-size: 14px; }
+    .conversation-toolbar { margin-bottom: 6px; padding: 4px 5px; }
+    .conversation-name { font-size: 9px; }
+    .toolbar-label { display: none; }
+    .toolbar-btn { width: 30px; min-width: 30px; padding: 0; }
 
     /* Footer: 3 items no longer fit one line on a phone */
     .hud-bottom { font-size: 9px; padding: 0 10px; flex-wrap: wrap; gap: 2px 10px; justify-content: center; text-align: center; }
@@ -1346,6 +1368,21 @@
   
   <!-- CENTER PANEL -->
   <section class="panel-center">
+    <div class="conversation-toolbar" aria-label="เครื่องมือการสนทนา">
+      <div class="conversation-title">
+        <i class="fas fa-comments"></i>
+        <div class="conversation-title-text">
+          <div class="conversation-name">JARVIS WORKSPACE</div>
+          <div class="conversation-state"><span id="connection-pill" class="connection-pill">● CONNECTED</span> · <span id="conversation-role">STAFF</span></div>
+        </div>
+      </div>
+      <div class="conversation-actions">
+        <button class="toolbar-btn" id="dashboard-btn" title="กลับหน้า Dashboard" aria-label="กลับหน้า Dashboard"><i class="fas fa-gauge-high"></i><span class="toolbar-label">Dashboard</span></button>
+        <button class="toolbar-btn active" id="panels-btn" title="เปิดหรือซ่อนแผงสถานะ" aria-label="เปิดหรือซ่อนแผงสถานะ" aria-pressed="true"><i class="fas fa-table-columns"></i><span class="toolbar-label">Panels</span></button>
+        <button class="toolbar-btn" id="reconnect-btn" title="ตรวจและเชื่อมต่อ Backend ใหม่" aria-label="เชื่อมต่อ Backend ใหม่"><i class="fas fa-rotate"></i></button>
+        <button class="toolbar-btn danger" id="new-chat-btn" title="เริ่มบทสนทนาใหม่" aria-label="เริ่มบทสนทนาใหม่"><i class="fas fa-plus"></i><span class="toolbar-label">New</span></button>
+      </div>
+    </div>
     
     <div class="arc-reactor-wrap">
       <div class="arc-reactor" id="arc-reactor">
@@ -1363,24 +1400,24 @@
       <span class="typing" id="status-typing">SYSTEM READY · AWAITING COMMAND</span>
     </div>
     
-    <div class="chat-log" id="chat-log"></div>
+    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="ประวัติการสนทนา"></div>
     
     <div class="input-area" id="input-area">
       <input type="text" id="user-input" placeholder="พิมพ์คำสั่งหรือคำถามของคุณ..." autocomplete="off">
       <input type="file" id="file-upload" style="display: none;" accept=".txt,.pdf,.docx,image/*">
-      <button class="input-btn" id="upload-btn" title="อัปโหลดเอกสารหรือรูปภาพ">
+      <button class="input-btn" id="upload-btn" title="อัปโหลดเอกสารหรือรูปภาพ" aria-label="อัปโหลดเอกสารหรือรูปภาพ">
         <i class="fas fa-paperclip"></i>
       </button>
-      <button class="input-btn vision-btn" id="vision-btn" title="สแกนหน้าจอและวิเคราะห์ (แอดมิน)">
+      <button class="input-btn vision-btn" id="vision-btn" title="สแกนหน้าจอและวิเคราะห์ (แอดมิน)" aria-label="สแกนหน้าจอและวิเคราะห์">
         <i class="fas fa-eye"></i>
       </button>
-      <button class="input-btn clipboard-btn" id="clipboard-btn" title="ดึงข้อความจากคลิปบอร์ด (แอดมิน)">
+      <button class="input-btn clipboard-btn" id="clipboard-btn" title="ดึงข้อความจากคลิปบอร์ด (แอดมิน)" aria-label="อ่านข้อความจากคลิปบอร์ด">
         <i class="fas fa-clipboard"></i>
       </button>
-      <button class="input-btn mic" id="mic-btn" title="เริ่มพูด">
+      <button class="input-btn mic" id="mic-btn" title="เริ่มพูด" aria-label="เริ่มหรือหยุดสนทนาด้วยเสียง">
         <i class="fas fa-microphone"></i>
       </button>
-      <button class="input-btn" id="send-btn" title="ส่งข้อความ">
+      <button class="input-btn" id="send-btn" title="ส่งข้อความ" aria-label="ส่งข้อความ">
         <i class="fas fa-paper-plane"></i>
       </button>
     </div>
@@ -1395,17 +1432,17 @@
         <div class="weather-temp" id="weather-temp">--°C</div>
         <div class="weather-desc" id="weather-desc">LOADING...</div>
       </div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">WIND</span><span class="text-jvcyanb" id="wind-val">-- km/h</span></div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">HUMIDITY</span><span class="text-jvcyanb" id="humid-val">--%</span></div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">FEELS LIKE</span><span class="text-jvcyanb" id="feels-val">--°C</span></div>
+      <div class="info-row"><span class="info-key">WIND</span><span class="info-value" id="wind-val">-- km/h</span></div>
+      <div class="info-row"><span class="info-key">HUMIDITY</span><span class="info-value" id="humid-val">--%</span></div>
+      <div class="info-row"><span class="info-key">FEELS LIKE</span><span class="info-value" id="feels-val">--°C</span></div>
     </div>
 
     <div class="panel">
       <div class="panel-title">AI ENGINE <span class="badge">LIVE</span></div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">PROVIDER</span><span class="text-jvcyanb" id="ai-provider">--</span></div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">MODEL</span><span class="text-jvcyanb" id="ai-model">--</span></div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">KNOWLEDGE</span><span class="text-jvcyanb" id="ai-kb">--</span></div>
-      <div class="flex justify-between items-center py-1.5 border-b border-dashed border-jvcyan/10 font-techmono text-[11px] last:border-b-0"><span class="text-jvdim">SESSION</span><span class="text-jvcyanb" id="ai-session">--</span></div>
+      <div class="info-row"><span class="info-key">PROVIDER</span><span class="info-value" id="ai-provider">--</span></div>
+      <div class="info-row"><span class="info-key">MODEL</span><span class="info-value" id="ai-model">--</span></div>
+      <div class="info-row"><span class="info-key">KNOWLEDGE</span><span class="info-value" id="ai-kb">--</span></div>
+      <div class="info-row"><span class="info-key">SESSION</span><span class="info-value" id="ai-session">--</span></div>
     </div>
 
     <div class="panel">
@@ -1417,7 +1454,7 @@
   <!-- BOTTOM HUD -->
   <footer class="hud-bottom">
     <div>GEO: <span id="geo-coords">13.7563°N 100.5018°E</span></div>
-    <div>J.A.R.V.I.S. <span>v10.0.0</span> · SYSNECT <span>AI AGENT</span></div>
+    <div>J.A.R.V.I.S. <span>v10.1.0</span> · SYSNECT <span>AI AGENT</span></div>
     <div>ENCRYPTION: <span>AES-256</span> · STATUS: <span id="conn-status">SECURE</span></div>
   </footer>
   
@@ -1445,7 +1482,7 @@
   <aside class="admin-drawer" id="admin-drawer">
     <div class="admin-head">
       <div class="admin-title"><i class="fas fa-sliders"></i> แผงควบคุมแอดมิน</div>
-      <button class="admin-close" id="admin-close" title="ปิด"><i class="fas fa-xmark"></i></button>
+      <button class="admin-close" id="admin-close" title="ปิด" aria-label="ปิดแผงควบคุม"><i class="fas fa-xmark"></i></button>
     </div>
 
     <!-- System status -->
@@ -1457,10 +1494,10 @@
         <div class="admin-stat"><span class="admin-stat-k">KB FILES</span><span class="admin-stat-v" id="ap-kbfiles">--</span></div>
         <div class="admin-stat"><span class="admin-stat-k">KB CHARS</span><span class="admin-stat-v" id="ap-kbchars">--</span></div>
       </div>
-      <select id="ai-model-select" class="w-full mt-2 bg-jvcyan/[0.06] border border-jvcyan/25 text-jvcyan text-[11px] font-techmono py-1.5 px-1.5 rounded-sm cursor-pointer outline-none">
+      <select id="ai-model-select" class="model-select">
         <option value="">-- เปลี่ยนโมเดลหลัก --</option>
       </select>
-      <div id="ai-model-switch-msg" class="text-[10px] font-techmono mt-1"></div>
+      <div id="ai-model-switch-msg" class="model-switch-msg"></div>
     </div>
 
     <!-- Security monitor -->
@@ -1492,12 +1529,16 @@
 
     <!-- Training -->
     <div class="admin-section">
-      <div class="admin-section-title">ฝึกโมเดล (TRAINING)</div>
+      <div class="admin-section-title">คุณภาพและการฝึกโมเดล (AI QUALITY)</div>
       <div class="admin-stat-grid">
         <div class="admin-stat"><span class="admin-stat-k">LOG SESSIONS</span><span class="admin-stat-v" id="ap-logs">--</span></div>
         <div class="admin-stat"><span class="admin-stat-k">DATASET</span><span class="admin-stat-v" id="ap-dataset">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">QUALITY SCORE</span><span class="admin-stat-v" id="ap-quality-score">--</span></div>
+        <div class="admin-stat"><span class="admin-stat-k">PASS / REJECT</span><span class="admin-stat-v" id="ap-quality-pass">--</span></div>
       </div>
-      <button class="admin-btn wide" id="ap-build-btn"><i class="fas fa-graduation-cap"></i> สร้างชุดข้อมูลฝึกจากบทสนทนา</button>
+      <button class="admin-btn wide" id="ap-quality-btn"><i class="fas fa-vial-circle-check"></i> ตรวจคุณภาพชุดข้อมูลปัจจุบัน</button>
+      <button class="admin-btn wide primary" id="ap-build-btn"><i class="fas fa-graduation-cap"></i> สร้างชุดฝึกใหม่ผ่าน Quality Gate</button>
+      <div class="admin-note" id="ap-quality-issues">ระบบจะตัดข้อมูลซ้ำ ข้อมูลลับ คำตอบผิดสิทธิ์ และคำตอบที่ไม่ปลอดภัยก่อนฝึก</div>
       <div class="admin-note" id="ap-build-note"></div>
     </div>
 
@@ -1747,14 +1788,17 @@ async function fetchSystemStatus() {
 async function fetchHealth() {
   try {
     const res = await apiFetch('/api/health');
+    if (!res.ok) throw new Error('health unavailable');
     const h = await res.json();
     document.getElementById('ai-provider').textContent = String(h.active_ai || '--').toUpperCase();
     const model = (h.models && h.models[h.active_ai]) || '--';
     document.getElementById('ai-model').textContent = model;
     const kbCount = Number((h.knowledge && h.knowledge.files) || 0);
     document.getElementById('ai-kb').textContent = kbCount + ' ไฟล์';
+    setConnectionState(true, 'Backend พร้อมใช้งาน');
   } catch (err) {
     document.getElementById('ai-provider').textContent = 'OFFLINE';
+    setConnectionState(false, 'เชื่อมต่อ Backend ไม่ได้');
   }
   document.getElementById('ai-session').textContent = String(sessionId || '').slice(0, 8);
 }
@@ -1831,7 +1875,7 @@ async function fetchTokenStatus() {
     const html = order.filter(name => providers[name]).map(name => {
       const p = providers[name];
       const label = TOKEN_STATUS_LABELS[name] || name.toUpperCase();
-      const modelTag = p.model ? `<span class="text-jvdim text-[8px] ml-1">${p.model}</span>` : '';
+      const modelTag = p.model ? `<span class="token-model-tag">${p.model}</span>` : '';
       if (!p.configured) {
         return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">ไม่ได้ตั้งค่า</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
       }
@@ -2141,9 +2185,9 @@ function addMessage(role, text) {
   let htmlContent = escapeHtml(text);
   if (role === 'user') {
     if (text.startsWith('[อัปโหลดรูปภาพ:')) {
-      htmlContent = `<i class="fas fa-image text-jvgreen mr-1.5"></i>${htmlContent}`;
+      htmlContent = `<i class="fas fa-image upload-file-icon image"></i>${htmlContent}`;
     } else if (text.startsWith('[อัปโหลดไฟล์:')) {
-      htmlContent = `<i class="fas fa-file-lines text-jvcyan mr-1.5"></i>${htmlContent}`;
+      htmlContent = `<i class="fas fa-file-lines upload-file-icon document"></i>${htmlContent}`;
     }
   }
   textEl.innerHTML = role === 'user' ? htmlContent : renderMarkdown(text);
@@ -2416,7 +2460,7 @@ async function processInput(input, options = {}) {
       // or fall back (that would just start a fresh answer right after stopping one).
       // Resetting isProcessing/the button icon is handled by the finally block below.
       window.speechSynthesis.cancel();
-      el.innerHTML = (acc ? renderMarkdown(acc) : '<span class="text-jvdim">(ไม่มีข้อความ — หยุดก่อนที่ AI จะเริ่มตอบ)</span>') +
+      el.innerHTML = (acc ? renderMarkdown(acc) : '<span class="text-dim">(ไม่มีข้อความ — หยุดก่อนที่ AI จะเริ่มตอบ)</span>') +
         ' <span class="stopped-tag">[หยุดแล้ว]</span>';
       scrollChat(false);
       statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
@@ -2462,6 +2506,65 @@ sendBtn.addEventListener('click', () => {
     processInput(userInput.value);
   }
 });
+
+function setConnectionState(online, detail) {
+  const pill = document.getElementById('connection-pill');
+  if (!pill) return;
+  pill.textContent = online ? '● CONNECTED' : '● OFFLINE';
+  pill.classList.toggle('offline', !online);
+  pill.title = detail || '';
+  document.getElementById('conn-status').textContent = online ? 'SECURE' : 'OFFLINE';
+}
+
+document.getElementById('dashboard-btn').addEventListener('click', () => {
+  mainInterface.classList.remove('chat-active');
+});
+
+document.getElementById('panels-btn').addEventListener('click', (event) => {
+  const hidden = mainInterface.classList.toggle('panels-hidden');
+  event.currentTarget.classList.toggle('active', !hidden);
+  event.currentTarget.setAttribute('aria-pressed', String(!hidden));
+});
+
+document.getElementById('reconnect-btn').addEventListener('click', async (event) => {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.querySelector('i').classList.add('fa-spin');
+  statusTyping.textContent = 'CHECKING CONNECTION...';
+  try {
+    await ensureSecureSession();
+    await Promise.all([fetchHealth(), fetchSystemStatus(), fetchAuthStatus(), fetchSecurityStatus()]);
+    statusTyping.textContent = 'CONNECTED · SYSTEM READY';
+  } catch (error) {
+    setConnectionState(false, 'เชื่อมต่อใหม่ไม่สำเร็จ');
+    statusTyping.textContent = 'CONNECTION ERROR';
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('i').classList.remove('fa-spin');
+  }
+});
+
+document.getElementById('new-chat-btn').addEventListener('click', async () => {
+  if (isProcessing) {
+    if (currentAbortController) currentAbortController.abort();
+    return;
+  }
+  if (!window.confirm('เริ่มบทสนทนาใหม่และล้างบริบทของ session นี้ใช่ไหมครับ?')) return;
+  try {
+    const response = await apiFetch('/api/chat/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    if (!response.ok) throw new Error('reset failed');
+    chatLog.innerHTML = '';
+    mainInterface.classList.remove('chat-active');
+    addMessage('jarvis', 'เริ่มบทสนทนาใหม่แล้วครับ พร้อมช่วยงานต่อทันที');
+    statusTyping.textContent = 'NEW CONVERSATION · SYSTEM READY';
+  } catch (error) {
+    addMessage('jarvis', 'ไม่สามารถเริ่มบทสนทนาใหม่ได้ครับ กรุณาตรวจการเชื่อมต่อ');
+  }
+});
+
 // keydown + isComposing: Enter mid-Thai-IME composition must not fire a send
 userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) processInput(userInput.value);
@@ -2514,6 +2617,16 @@ function setAdminBadge(on) {
   if (loginItem) loginItem.hidden = on;
   if (logoutItem) logoutItem.hidden = !on;
   if (adminItem) adminItem.hidden = !on;
+  const roleState = document.getElementById('conversation-role');
+  if (roleState) roleState.textContent = label.replace('SYSNECT ', '');
+  [document.getElementById('vision-btn'), document.getElementById('clipboard-btn')].forEach(control => {
+    if (!control) return;
+    control.dataset.locked = String(!on);
+    control.style.opacity = on ? '' : '0.5';
+    control.title = on
+      ? (control.id === 'vision-btn' ? 'สแกนหน้าจอและวิเคราะห์' : 'ดึงข้อความจากคลิปบอร์ด')
+      : 'ต้องเข้าสู่ระบบแอดมินก่อนใช้งาน';
+  });
   // if the admin panel is open and we just logged out, close it
   if (!on) { const ov = document.getElementById('admin-overlay'); if (ov) ov.hidden = true; }
 
@@ -2598,7 +2711,7 @@ async function loadAdminData() {
       modelName = (h.models && h.models[activeAi]) || '--';
     }
     document.getElementById('ap-model').textContent = modelName;
-    document.getElementById('ap-kbfiles').textContent = (h.knowledge && h.knowledge.files ? h.knowledge.files.length : 0) + ' ไฟล์';
+    document.getElementById('ap-kbfiles').textContent = Number((h.knowledge && h.knowledge.files) || 0) + ' ไฟล์';
     document.getElementById('ap-kbchars').textContent = (h.knowledge && h.knowledge.chars != null ? h.knowledge.chars : '--');
   } catch (e) { /* offline */ }
   await loadLearnedFacts();
@@ -2689,7 +2802,36 @@ async function loadTrainingStatus() {
     const s = await apiJSON('/api/training/status');
     document.getElementById('ap-logs').textContent = (s.log_sessions != null ? s.log_sessions : '--') + ' ไฟล์';
     document.getElementById('ap-dataset').textContent = (s.dataset_examples != null ? s.dataset_examples : '--') + ' คู่';
+    updateTrainingQualityUI(s.quality || {});
   } catch (e) { /* offline */ }
+}
+
+function updateTrainingQualityUI(q) {
+  const score = document.getElementById('ap-quality-score');
+  const pass = document.getElementById('ap-quality-pass');
+  const issues = document.getElementById('ap-quality-issues');
+  score.textContent = q.total ? `${q.average_score} / 100` : 'ยังไม่มีข้อมูล';
+  score.style.color = q.average_score >= 80 ? 'var(--green)' : (q.average_score >= 60 ? 'var(--gold)' : 'var(--red)');
+  pass.textContent = `${q.accepted || 0} / ${q.rejected || 0}`;
+  const issueSource = q.source_issue_counts || q.issue_counts || {};
+  const topIssues = Object.entries(issueSource).slice(0, 4).map(([name, count]) => `${name}: ${count}`);
+  issues.textContent = q.ready_for_training
+    ? `✅ พร้อมฝึก · ผ่าน ${q.pass_rate}%` + (topIssues.length ? ` · ${topIssues.join(', ')}` : '')
+    : `⚠️ ยังไม่พร้อมฝึก · ต้องมีอย่างน้อย 100 ตัวอย่าง คะแนนเฉลี่ย 80 และผ่าน 80%` + (topIssues.length ? ` · พบ ${topIssues.join(', ')}` : '');
+}
+
+async function validateDatasetUI() {
+  const btn = document.getElementById('ap-quality-btn');
+  btn.disabled = true;
+  try {
+    const q = await apiJSON('/api/training/quality');
+    updateTrainingQualityUI(q);
+    adminToast(q.ready_for_training ? '✅ ชุดข้อมูลผ่านเกณฑ์พร้อมฝึก' : `⚠️ ตรวจแล้ว: ผ่าน ${q.accepted || 0}, คัดออก ${q.rejected || 0}`, !q.ready_for_training);
+  } catch (e) {
+    adminToast('ตรวจคุณภาพชุดข้อมูลไม่ได้', true);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function teachFactUI() {
@@ -2736,8 +2878,10 @@ async function buildDatasetUI() {
       body: JSON.stringify({ session_id: sessionId })
     });
     if (d.status === 'ok') {
-      note.textContent = `✅ สร้างชุดฝึกแล้ว ${d.examples} คู่ (จาก ${d.log_files} ไฟล์ log) → ${d.path}`;
-      adminToast('🎓 สร้างชุดฝึกสำเร็จ ' + d.examples + ' คู่');
+      const q = d.quality || {};
+      note.textContent = `✅ ผ่าน Quality Gate ${d.examples} คู่ · train ${d.train_examples || 0} · validation ${d.validation_examples || 0} · คัดออกจากต้นทาง ${q.source_rejected || 0}`;
+      updateTrainingQualityUI(q);
+      adminToast('🎓 สร้างชุดฝึกที่ผ่านการคัดกรองแล้ว ' + d.examples + ' คู่');
       await loadTrainingStatus();
     } else { note.textContent = d.message || 'สร้างไม่สำเร็จ'; adminToast(d.message || 'สร้างไม่สำเร็จ', true); }
   } catch (e) { note.textContent = 'เชื่อมต่อไม่ได้'; adminToast('เชื่อมต่อไม่ได้', true); }
@@ -2750,6 +2894,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !adminOv
 document.getElementById('ap-teach-btn').addEventListener('click', teachFactUI);
 document.getElementById('ap-teach-input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) teachFactUI(); });
 document.getElementById('ap-build-btn').addEventListener('click', buildDatasetUI);
+document.getElementById('ap-quality-btn').addEventListener('click', validateDatasetUI);
 document.getElementById('ap-panic-btn').addEventListener('click', panicLockdown);
 document.getElementById('ap-sec-clear-btn').addEventListener('click', clearSecurityLockdown);
 async function submitAuth() {
@@ -2934,6 +3079,12 @@ function base64ToFile(b64, mime, filename) {
 
 visionBtn.addEventListener('click', async () => {
   if (isProcessing) return;
+  if (!isAdmin) {
+    enterChatMode();
+    addMessage('jarvis', 'ฟังก์ชันสแกนหน้าจอต้องเข้าสู่ระบบแอดมินก่อนครับ');
+    openAuthModal();
+    return;
+  }
   visionBtn.classList.add('scanning');
   statusTyping.textContent = 'SCANNING VISUAL CORTEX...';
   try {
@@ -2957,6 +3108,12 @@ visionBtn.addEventListener('click', async () => {
 
 clipboardBtn.addEventListener('click', async () => {
   if (isProcessing) return;
+  if (!isAdmin) {
+    enterChatMode();
+    addMessage('jarvis', 'ฟังก์ชันอ่านคลิปบอร์ดต้องเข้าสู่ระบบแอดมินก่อนครับ');
+    openAuthModal();
+    return;
+  }
   statusTyping.textContent = 'READING CLIPBOARD...';
   try {
     const res = await apiFetch('/api/os/clipboard?session_id=' + encodeURIComponent(sessionId));

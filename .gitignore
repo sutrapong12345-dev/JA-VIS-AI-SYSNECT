@@ -17,6 +17,9 @@ outputs/
 # Logs / chat history / generated training data — may contain real conversations
 logs/
 training/dataset_sysnect.jsonl
+training/dataset_train.jsonl
+training/dataset_validation.jsonl
+training/quality_report.json
 backend/data/
 
 # OS / IDE
