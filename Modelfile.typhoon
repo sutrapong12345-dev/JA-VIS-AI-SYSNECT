@@ -1,9 +1,27 @@
 # J.A.R.V.I.S. Thai-specialized model for SYSNECT AI Agent
-# Base: scb10x/typhoon2.5-qwen3-4b — Thai/English bilingual LLM by SCB10X
-# (Qwen3 base, fine-tuned for Thai → กัน "จีนปน" ที่เจอใน qwen2.5/openthaigpt)
+# Base: typhoon2.5-qwen3-4b (SCB10X) — Thai/English bilingual, Qwen3 base
+# GGUF จาก https://huggingface.co/typhoon-ai/typhoon2.5-qwen3-4b-gguf (q4_k_m)
+# (ollama pull scb10x/... ใช้ไม่ได้ตอนสร้าง — เน็ตหลุดแล้ว pull เริ่มใหม่จากศูนย์
+#  จึงโหลด GGUF ด้วย curl แบบ resume แทน; ไฟล์คือ blob เดียวกันทุก byte)
 # Rebuild with:  ollama create jarvis-thai -f Modelfile.typhoon
 
-FROM scb10x/typhoon2.5-qwen3-4b
+FROM D:\AI Data\models\typhoon2.5-qwen3-4b-q4_k_m.gguf
+
+# ChatML template (Qwen3 family). The empty <think></think> block pins the
+# model to non-thinking mode so reasoning text never leaks into the chat.
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+<think>
+
+</think>
+
+{{ .Response }}<|im_end|>
+"""
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
 
 # Context window (backend injects knowledge base up to ~12k chars + history)
 PARAMETER num_ctx 8192
