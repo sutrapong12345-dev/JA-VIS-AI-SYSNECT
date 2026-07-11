@@ -1417,7 +1417,7 @@
   <!-- BOTTOM HUD -->
   <footer class="hud-bottom">
     <div>GEO: <span id="geo-coords">13.7563°N 100.5018°E</span></div>
-    <div>J.A.R.V.I.S. <span>v9.5.0</span> · SYSNECT <span>AI AGENT</span></div>
+    <div>J.A.R.V.I.S. <span>v10.0.0</span> · SYSNECT <span>AI AGENT</span></div>
     <div>ENCRYPTION: <span>AES-256</span> · STATUS: <span id="conn-status">SECURE</span></div>
   </footer>
   
@@ -1525,7 +1525,7 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = 'https://alternatives-hispanic-clocks-excel.trycloudflare.com';
+const API_BASE = window.JARVIS_API_BASE || 'https://alternatives-hispanic-clocks-excel.trycloudflare.com';
 
 // Session identity is issued by the backend. A client-generated ID is never an
 // authentication credential and cannot be used to open another user's session.

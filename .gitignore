@@ -17,6 +17,7 @@ outputs/
 # Logs / chat history / generated training data — may contain real conversations
 logs/
 training/dataset_sysnect.jsonl
+backend/data/
 
 # OS / IDE
 .DS_Store

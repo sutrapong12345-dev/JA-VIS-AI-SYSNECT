@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import glob
+import hashlib
 import hmac
 import io
 import json
@@ -24,6 +25,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 import re
+import secrets
 import subprocess
 import sys
 import urllib.request
@@ -39,10 +41,19 @@ from typing import Any, Dict, List, Optional
 import psutil
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+try:
+    from .audit_store import AuditStore
+    from .agent_tools import TOOL_TAG_RE, ToolValidationError, parse_tool_calls, tool_catalog_for_prompt, validate_tool_call
+    from .rag_store import RagStore
+except ImportError:  # direct execution: python backend/main.py
+    from audit_store import AuditStore
+    from agent_tools import TOOL_TAG_RE, ToolValidationError, parse_tool_calls, tool_catalog_for_prompt, validate_tool_call
+    from rag_store import RagStore
 
 # --------------------------------------------------------------------------- #
 #  Setup
@@ -56,7 +67,9 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 DEFAULT_KNOWLEDGE_DIR = os.path.join(BASE_DIR, "knowledge")
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")        # EVERY action gets logged here (jarvis.log) + per-session chat JSON
 TRAINING_DIR = os.path.join(ROOT_DIR, "training")  # fine-tune datasets are built here
+DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # Every action JARVIS takes (chat, commands, admin logins, vision/clipboard,
 # searches, knowledge changes, errors...) is logged to logs/jarvis.log, rotated
@@ -140,16 +153,18 @@ class Settings:
     # knowledge base above, so there is no fixed char-limit ceiling on coverage).
     sysnect_data_dirs: List[str] = field(default_factory=lambda: _env_list(
         "SYSNECT_DATA_DIRS",
-        ",".join([
-            r"D:\AI Data\sysnect-local-ai",
-            r"D:\SYSNECT  WORK SPACE\Sysnect Project Ticket\Sysnect html",
-            ROOT_DIR,
-        ]),
+        ROOT_DIR,
     ))
 
     # Admin login (Authentication modal — real values live in backend/.env only)
     admin_username: str = os.getenv("ADMIN_USERNAME", "sutrapongadmin")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "")  # empty = login disabled
+
+    # How long an admin login stays valid before requiring the password again —
+    # independent of SESSION_TTL_SECONDS (which governs chat cache eviction).
+    # Privilege is memory-only and is also lost on restart. Default 8h (one shift).
+    # 0 disables time expiry until restart (not recommended).
+    admin_session_ttl_seconds: int = int(os.getenv("ADMIN_SESSION_TTL_SECONDS", str(8 * 3600)))
 
     # Superadmin security override code — a SEPARATE secret (not the login
     # password) that can lift a security lockdown even without an existing
@@ -188,14 +203,17 @@ class Settings:
     session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", "3600"))
 
     # Security
-    # Defaults preserve the original behavior (commands enabled, open anything).
-    # To lock down: set ENABLE_COMMAND_EXECUTION=false, or ENABLE_SHELL_COMMANDS=false
-    # to allow only OPEN, or set COMMAND_ALLOWLIST to restrict which apps OPEN may launch.
-    cors_origins: List[str] = field(default_factory=lambda: _env_list("CORS_ORIGINS", "*"))
-    enable_command_execution: bool = _env_bool("ENABLE_COMMAND_EXECUTION", True)
-    enable_shell_commands: bool = _env_bool("ENABLE_SHELL_COMMANDS", True)
+    # Safe defaults keep all PC control disabled. An administrator may explicitly
+    # enable OPEN-only tools, then separately enable raw shell if truly required.
+    cors_origins: List[str] = field(default_factory=lambda: _env_list(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:5500,http://localhost:5500",
+    ))
+    enable_command_execution: bool = _env_bool("ENABLE_COMMAND_EXECUTION", False)
+    enable_shell_commands: bool = _env_bool("ENABLE_SHELL_COMMANDS", False)
+    require_shell_confirmation: bool = _env_bool("REQUIRE_SHELL_CONFIRMATION", True)
     command_allowlist: List[str] = field(
-        default_factory=lambda: _env_list("COMMAND_ALLOWLIST", "")  # empty = allow all (original)
+        default_factory=lambda: _env_list("COMMAND_ALLOWLIST", "notepad,calc")
     )
     # Last-resort guard: even in GOD MODE, block a handful of IRREVERSIBLE,
     # machine-destroying commands (format/wipe a whole drive, diskpart clean).
@@ -203,9 +221,17 @@ class Settings:
     # command (web search / uploaded docs are injection vectors). Everything else
     # — open apps, run normal PowerShell — still works. Set to true to remove it.
     allow_destructive_commands: bool = _env_bool("ALLOW_DESTRUCTIVE_COMMANDS", False)
+    session_token_ttl_seconds: int = int(os.getenv("SESSION_TOKEN_TTL_SECONDS", str(12 * 3600)))
+    trust_cloudflare_access_headers: bool = _env_bool("TRUST_CLOUDFLARE_ACCESS_HEADERS", False)
+    require_org_identity: bool = _env_bool("REQUIRE_ORG_IDENTITY", False)
+    org_allowed_domains: List[str] = field(default_factory=lambda: _env_list("ORG_ALLOWED_DOMAINS", ""))
+    manager_emails: List[str] = field(default_factory=lambda: _env_list("MANAGER_EMAILS", ""))
+    admin_emails: List[str] = field(default_factory=lambda: _env_list("ADMIN_EMAILS", ""))
 
 
 settings = Settings()
+audit_store = AuditStore(os.path.join(DATA_DIR, "audit.db"))
+rag_store = RagStore(os.path.join(DATA_DIR, "knowledge.db"))
 
 
 # --------------------------------------------------------------------------- #
@@ -225,7 +251,14 @@ class Session:
     history: List[Dict[str, str]] = field(default_factory=list)
     document: str = ""
     is_admin: bool = False
+    # When admin was granted (time.time()) — lets is_admin() auto-expire the
+    # privilege after ADMIN_SESSION_TTL_SECONDS instead of it lasting forever.
+    admin_granted_at: float = 0.0
     last_seen: float = field(default_factory=time.time)
+    # Rolling summary of everything that's aged out of `history` (beyond
+    # max_history) — keeps long-run context (names, decisions, open tasks)
+    # available to the model even after the raw messages are trimmed.
+    summary: str = ""
     # A destructive action (e.g. a delete-ish shell command) waiting for the
     # admin password to be re-entered before it actually runs.
     pending_action: Optional[Dict[str, object]] = None
@@ -260,14 +293,15 @@ class SessionStore:
                 except Exception as exc:
                     log.error("Failed to load session history from disk for %s: %s", session_id, exc)
             
-            # Try to load admin metadata from disk if it exists
+            # Load only non-privileged conversation memory. Admin authorization is
+            # deliberately never restored from disk; a restart requires login.
             meta_path = os.path.join(LOGS_DIR, f"session_metadata_{skey}.json")
             if os.path.isfile(meta_path):
                 try:
                     with open(meta_path, "r", encoding="utf-8") as fh:
                         meta = json.load(fh)
                         if isinstance(meta, dict):
-                            session.is_admin = meta.get("is_admin", False)
+                            session.summary = meta.get("summary", "")
                 except Exception:
                     pass
 
@@ -275,14 +309,27 @@ class SessionStore:
         session.last_seen = time.time()
         return session
 
+    def _save_meta_locked(self, session_id: str, session: "Session") -> None:
+        """Persist non-privileged memory only; never serialize authorization."""
+        meta_path = os.path.join(LOGS_DIR, f"session_metadata_{safe_session_key(session_id)}.json")
+        try:
+            os.makedirs(LOGS_DIR, exist_ok=True)
+            with open(meta_path, "w", encoding="utf-8") as fh:
+                json.dump({"summary": session.summary}, fh, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            log.error("Failed to save session metadata to disk for %s: %s", session_id, exc)
+
     def add_message(self, session_id: str, role: str, content: str) -> None:
+        dropped: List[Dict[str, str]] = []
         with self._lock:
             self._prune_locked()
             session = self._get_or_create(session_id)
             session.history.append({"role": role, "content": content})
             if len(session.history) > self._max_history:
-                session.history = session.history[-self._max_history:]
-            
+                overflow = len(session.history) - self._max_history
+                dropped = session.history[:overflow]
+                session.history = session.history[overflow:]
+
             # Save history to disk in real-time
             log_path = os.path.join(LOGS_DIR, f"chat_log_{safe_session_key(session_id)}.json")
             try:
@@ -291,6 +338,25 @@ class SessionStore:
                     json.dump(session.history, fh, ensure_ascii=False, indent=2)
             except Exception as exc:
                 log.error("Failed to save session history to disk for %s: %s", session_id, exc)
+
+        # Folding old messages into the rolling summary makes an LLM call, so
+        # it happens outside the lock — it's only triggered once every
+        # max_history messages, not on every chat turn.
+        if dropped:
+            self._fold_into_summary(session_id, dropped)
+
+    def _fold_into_summary(self, session_id: str, dropped: List[Dict[str, str]]) -> None:
+        with self._lock:
+            existing_summary = self._get_or_create(session_id).summary
+        new_summary = _summarize_dropped(existing_summary, dropped)
+        with self._lock:
+            session = self._get_or_create(session_id)
+            session.summary = new_summary
+            self._save_meta_locked(session_id, session)
+
+    def get_summary(self, session_id: str) -> str:
+        with self._lock:
+            return self._get_or_create(session_id).summary
 
     def get_history(self, session_id: str) -> List[Dict[str, str]]:
         with self._lock:
@@ -306,20 +372,27 @@ class SessionStore:
 
     def is_admin(self, session_id: str) -> bool:
         with self._lock:
-            return self._get_or_create(session_id).is_admin
+            session = self._get_or_create(session_id)
+            if not session.is_admin:
+                return False
+            ttl = settings.admin_session_ttl_seconds
+            elapsed = time.time() - session.admin_granted_at
+            if ttl and elapsed > ttl:
+                # Privilege has aged out — revoke it now rather than let it
+                # silently ride forever on a stale disk-persisted flag.
+                session.is_admin = False
+                session.admin_granted_at = 0.0
+                self._save_meta_locked(session_id, session)
+                log.info("Admin session expired (%ds since login, TTL=%ds) — re-auth required (session %s...)", int(elapsed), ttl, session_id[:8])
+                return False
+            return True
 
     def set_admin(self, session_id: str, is_admin: bool) -> None:
         with self._lock:
-            self._get_or_create(session_id).is_admin = is_admin
-            
-            # Save admin metadata to disk to persist across server restarts/reloads
-            meta_path = os.path.join(LOGS_DIR, f"session_metadata_{safe_session_key(session_id)}.json")
-            try:
-                os.makedirs(LOGS_DIR, exist_ok=True)
-                with open(meta_path, "w", encoding="utf-8") as fh:
-                    json.dump({"is_admin": is_admin}, fh, ensure_ascii=False, indent=2)
-            except Exception as exc:
-                log.error("Failed to save session metadata to disk for %s: %s", session_id, exc)
+            session = self._get_or_create(session_id)
+            session.is_admin = is_admin
+            session.admin_granted_at = time.time() if is_admin else 0.0
+            self._save_meta_locked(session_id, session)
 
     def get_pending_action(self, session_id: str) -> Optional[Dict[str, object]]:
         with self._lock:
@@ -341,6 +414,109 @@ class SessionStore:
 
 
 store = SessionStore(settings.max_history, settings.session_ttl_seconds)
+
+
+# --------------------------------------------------------------------------- #
+#  Server-issued session credentials
+# --------------------------------------------------------------------------- #
+@dataclass
+class SessionCredential:
+    session_id: str
+    created_at: float
+    last_seen: float
+    actor_id: str = "anonymous"
+    role: str = "staff"
+
+
+class SessionAuthenticator:
+    """Issues opaque bearer tokens and binds each token to exactly one session.
+
+    Client-provided session IDs are never trusted as identity. Tokens are stored
+    only as SHA-256 digests, so a memory dump of this table does not expose live
+    bearer credentials. Credentials intentionally expire and are not persisted;
+    a backend restart signs clients out instead of reviving stale privileges.
+    """
+
+    def __init__(self, ttl_seconds: int):
+        self._ttl = max(300, ttl_seconds)
+        self._credentials: Dict[str, SessionCredential] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _digest(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def issue(self, actor_id: str = "anonymous", role: str = "staff") -> Dict[str, str]:
+        now = time.time()
+        session_id = f"session_{secrets.token_urlsafe(24)}"
+        token = secrets.token_urlsafe(48)
+        with self._lock:
+            self._prune_locked(now)
+            self._credentials[self._digest(token)] = SessionCredential(
+                session_id, now, now, actor_id=actor_id, role=role,
+            )
+        return {"session_id": session_id, "token": token, "role": role}
+
+    def validate(self, token: str) -> Optional[str]:
+        credential = self.validate_credential(token)
+        return credential.session_id if credential else None
+
+    def validate_credential(self, token: str) -> Optional[SessionCredential]:
+        if not token:
+            return None
+        now = time.time()
+        digest = self._digest(token)
+        with self._lock:
+            self._prune_locked(now)
+            credential = self._credentials.get(digest)
+            if credential is None:
+                return None
+            credential.last_seen = now
+            return credential
+
+    def _prune_locked(self, now: float) -> None:
+        expired = [
+            digest for digest, credential in self._credentials.items()
+            if now - credential.last_seen > self._ttl
+        ]
+        for digest in expired:
+            del self._credentials[digest]
+
+
+session_auth = SessionAuthenticator(settings.session_token_ttl_seconds)
+
+
+def _bearer_token(http_request: Request) -> str:
+    authorization = http_request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
+def _bound_session(http_request: Request, claimed_session_id: str = "") -> str:
+    """Return the authenticated session and reject cross-session claims."""
+    bound = getattr(http_request.state, "session_id", "")
+    if not bound:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    claimed = (claimed_session_id or "").strip()
+    if claimed and claimed != "default" and not hmac.compare_digest(claimed, bound):
+        raise HTTPException(status_code=403, detail="Session does not belong to this credential")
+    return bound
+
+
+def _request_identity(http_request: Request) -> Dict[str, str]:
+    session_id = _bound_session(http_request)
+    return {
+        "session_id": session_id,
+        "actor_id": getattr(http_request.state, "actor_id", "anonymous"),
+        "role": "admin" if store.is_admin(session_id) else getattr(http_request.state, "role", "staff"),
+    }
+
+
+def _admin_session(http_request: Request, claimed_session_id: str = "") -> str:
+    session_id = _bound_session(http_request, claimed_session_id)
+    if not store.is_admin(session_id):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return session_id
 
 
 # --------------------------------------------------------------------------- #
@@ -379,6 +555,9 @@ class RateLimiter:
 
 def client_ip(http_request: Request) -> str:
     """Real client IP even behind a reverse proxy / Cloudflare Tunnel."""
+    cloudflare_ip = http_request.headers.get("cf-connecting-ip")
+    if cloudflare_ip:
+        return cloudflare_ip.strip()
     fwd = http_request.headers.get("x-forwarded-for")
     if fwd:
         return fwd.split(",")[0].strip()
@@ -388,6 +567,7 @@ def client_ip(http_request: Request) -> str:
 login_rate_limiter = RateLimiter(max_attempts=5, window_seconds=300)   # 5 tries / 5 min / IP
 chat_rate_limiter = RateLimiter(max_attempts=30, window_seconds=60)    # 30 msgs / 1 min / IP
 security_override_rate_limiter = RateLimiter(max_attempts=5, window_seconds=300)  # 5 tries / 5 min / IP
+session_rate_limiter = RateLimiter(max_attempts=20, window_seconds=60)  # session bootstrap abuse guard
 
 
 # --------------------------------------------------------------------------- #
@@ -512,6 +692,147 @@ security_monitor = SecurityMonitor()
 
 
 # --------------------------------------------------------------------------- #
+#  Reminders — simple automation. A user can say '[เตือน: 10 นาที: ประชุม]' and
+#  a background thread fires it later; the frontend polls /api/reminders/pending
+#  to pick up due reminders and shows them as a chat message.
+# --------------------------------------------------------------------------- #
+@dataclass
+class Reminder:
+    id: str
+    session_id: str
+    message: str
+    due_at: float
+    created_at: float = field(default_factory=time.time)
+    fired: bool = False
+
+
+class ReminderStore:
+    """Thread-safe reminder list, persisted to logs/reminders.json so scheduled
+    reminders survive a backend restart."""
+
+    def __init__(self, path: str):
+        self._path = path
+        self._lock = threading.Lock()
+        self._reminders: Dict[str, Reminder] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not os.path.isfile(self._path):
+            return
+        try:
+            with open(self._path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+            for item in raw:
+                r = Reminder(**item)
+                self._reminders[r.id] = r
+        except Exception as exc:  # noqa: BLE001
+            log.error("Failed to load reminders: %s", exc)
+
+    def _save_locked(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._path), exist_ok=True)
+            with open(self._path, "w", encoding="utf-8") as fh:
+                json.dump([r.__dict__ for r in self._reminders.values()], fh, ensure_ascii=False, indent=2)
+        except Exception as exc:  # noqa: BLE001
+            log.error("Failed to save reminders: %s", exc)
+
+    def add(self, session_id: str, message: str, due_at: float) -> Reminder:
+        with self._lock:
+            rid = f"rem_{int(time.time() * 1000)}_{len(self._reminders)}"
+            r = Reminder(id=rid, session_id=session_id, message=message, due_at=due_at)
+            self._reminders[rid] = r
+            self._save_locked()
+            return r
+
+    def cancel(self, session_id: str, reminder_id: str) -> bool:
+        with self._lock:
+            r = self._reminders.get(reminder_id)
+            if not r or r.session_id != session_id:
+                return False
+            del self._reminders[reminder_id]
+            self._save_locked()
+            return True
+
+    def list_active(self, session_id: str) -> List[Reminder]:
+        with self._lock:
+            return sorted(
+                (r for r in self._reminders.values() if r.session_id == session_id and not r.fired),
+                key=lambda r: r.due_at,
+            )
+
+    def pop_due(self, session_id: str) -> List[Reminder]:
+        """Returns reminders that are due and not yet delivered, marking them
+        fired and dropping them from storage (they've been picked up)."""
+        now = time.time()
+        due: List[Reminder] = []
+        with self._lock:
+            for rid, r in list(self._reminders.items()):
+                if r.session_id == session_id and not r.fired and r.due_at <= now:
+                    r.fired = True
+                    due.append(r)
+                    del self._reminders[rid]
+            if due:
+                self._save_locked()
+        return due
+
+    def prune_stale(self, max_age_seconds: int = 7 * 24 * 3600) -> None:
+        """Drops reminders nobody ever polled for (e.g. session abandoned) so
+        the file doesn't grow forever."""
+        cutoff = time.time() - max_age_seconds
+        with self._lock:
+            stale = [rid for rid, r in self._reminders.items() if r.due_at < cutoff]
+            for rid in stale:
+                del self._reminders[rid]
+            if stale:
+                self._save_locked()
+
+
+reminders = ReminderStore(os.path.join(LOGS_DIR, "reminders.json"))
+
+
+def _reminder_janitor() -> None:
+    while True:
+        time.sleep(3600)
+        try:
+            reminders.prune_stale()
+        except Exception as exc:  # noqa: BLE001
+            log.error("Reminder janitor error: %s", exc)
+
+
+threading.Thread(target=_reminder_janitor, daemon=True).start()
+
+# "[เตือน: 10 นาที: ประชุมทีม]" / "[remind: 10m: team meeting]" -> schedules a reminder.
+_REMIND_RE = re.compile(
+    r"^\s*\[(?:เตือน|remind)\s*:\s*(\d+)\s*(นาที|min|minutes?|ชม\.?|ชั่วโมง|hours?|hr)?\s*:\s*(.*)\]\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_LIST_REMINDERS_TEXTS = ("[รายการแจ้งเตือน]", "[reminders]", "[list reminders]")
+
+
+def _extract_reminder(msg: str) -> Optional[Dict[str, object]]:
+    m = _REMIND_RE.match(msg or "")
+    if not m:
+        return None
+    amount = int(m.group(1))
+    unit = (m.group(2) or "นาที").lower()
+    text = " ".join(m.group(3).split())
+    seconds = amount * 3600 if unit.startswith(("ชม", "ชั่วโมง", "hour", "hr")) else amount * 60
+    return {"seconds": seconds, "text": text, "amount": amount, "unit_is_hours": seconds >= 3600 and amount * 60 != seconds}
+
+
+def format_reminder_list(session_id: str) -> str:
+    active = reminders.list_active(session_id)
+    if not active:
+        return "ไม่มีการแจ้งเตือนที่ตั้งไว้ครับบอส — พิมพ์ `[เตือน: 10 นาที: ข้อความ]` เพื่อตั้งใหม่ได้เลยครับ"
+    lines = ["⏰ **รายการแจ้งเตือนที่ตั้งไว้**\n"]
+    for r in active:
+        remain = max(0, int(r.due_at - time.time()))
+        mins = remain // 60
+        lines.append(f"- (`{r.id}`) อีก {mins} นาที: {r.message}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
 #  Company knowledge base
 # --------------------------------------------------------------------------- #
 class KnowledgeBase:
@@ -553,8 +874,9 @@ class KnowledgeBase:
         with self._lock:
             self._text = text
             self._files = files
+        rag_info = rag_store.index_directory(self._dir)
         log.info("Knowledge base loaded: %d file(s), %d chars", len(files), len(text))
-        return {"files": files, "chars": len(text)}
+        return {"files": files, "chars": len(text), "rag": rag_info}
 
     @property
     def text(self) -> str:
@@ -563,7 +885,10 @@ class KnowledgeBase:
 
     def info(self) -> Dict[str, object]:
         with self._lock:
-            return {"directory": self._dir, "files": list(self._files), "chars": len(self._text)}
+            return {
+                "directory": self._dir, "files": list(self._files),
+                "chars": len(self._text), "rag": rag_store.info(),
+            }
 
 
 knowledge = KnowledgeBase(settings.knowledge_dir, settings.knowledge_char_limit)
@@ -978,7 +1303,10 @@ class CommandAgent:
     def enabled(self) -> bool:
         return self._settings.enable_command_execution
 
-    def process(self, reply: str, session_id: str = "default", is_admin: bool = False) -> str:
+    def process(
+        self, reply: str, session_id: str = "default", is_admin: bool = False,
+        role: str = "staff", actor_id: str = "anonymous",
+    ) -> str:
         """Execute commands found in the reply, strip the tags, and append a
         real status report so the user sees what actually happened.
 
@@ -989,6 +1317,31 @@ class CommandAgent:
         it will NOT run. The system prompt is only a first line of defense."""
         if not reply:
             return reply
+
+        effective_role = "admin" if is_admin else role
+        try:
+            tool_calls = parse_tool_calls(reply)
+        except ToolValidationError as exc:
+            audit_store.append(
+                "tool.parse", "denied", actor_id=actor_id, actor_role=effective_role,
+                session_id=session_id, details={"error": str(exc)},
+            )
+            return f"🚫 Tool request มีรูปแบบไม่ถูกต้อง: {exc}"
+        if tool_calls:
+            cleaned_tools = TOOL_TAG_RE.sub("", reply).strip()
+            statuses = []
+            for payload in tool_calls[:3]:
+                try:
+                    call = validate_tool_call(payload, effective_role)
+                    statuses.append(self._execute_structured_tool(call, session_id, actor_id, effective_role))
+                except ToolValidationError as exc:
+                    audit_store.append(
+                        "tool.validate", "denied", actor_id=actor_id, actor_role=effective_role,
+                        session_id=session_id, details={"error": str(exc)},
+                    )
+                    statuses.append(f"🚫 Tool request ถูกปฏิเสธ: {exc}")
+            footer = "\n\n".join(statuses)
+            return f"{cleaned_tools}\n\n{footer}".strip()
 
         commands = [c.strip() for c in self._CMD_RE.findall(reply)]
         cleaned = self._CMD_RE.sub("", reply).strip()
@@ -1015,6 +1368,70 @@ class CommandAgent:
         if cleaned and footer:
             return f"{cleaned}\n\n{footer}"
         return cleaned or footer or "ดำเนินการตามคำสั่งเรียบร้อยแล้วครับบอส"
+
+    def _execute_structured_tool(
+        self, call: Dict[str, Any], session_id: str, actor_id: str, role: str,
+    ) -> str:
+        name = call["name"]
+        arguments = call["arguments"]
+        if call["approval_required"]:
+            if not self.enabled:
+                return "ระบบเปิดโปรแกรมถูกปิดใช้งานอยู่ครับ"
+            action_id = f"act_{secrets.token_urlsafe(8)}"
+            store.set_pending_action(session_id, {
+                "id": action_id, "kind": "structured_tool", "tool": name,
+                "arguments": arguments, "created": time.time(), "actor_id": actor_id,
+                "role": role,
+            })
+            audit_store.append(
+                "tool.propose", "pending", actor_id=actor_id, actor_role=role,
+                session_id=session_id, target=name,
+                details={"action_id": action_id, "arguments": arguments, "risk": call["risk"]},
+            )
+            return (
+                f"⚠️ **รายการรออนุมัติ** `{action_id}`\n"
+                f"Tool: `{name}`\nArguments: `{json.dumps(arguments, ensure_ascii=False)}`\n\n"
+                "ตรวจสอบแล้วพิมพ์ `[ยืนยันคำสั่ง: รหัสผ่านของท่าน]` ภายใน 2 นาทีครับ"
+            )
+        return self._run_sandbox_tool(name, arguments, session_id, actor_id, role)
+
+    def _run_sandbox_tool(
+        self, name: str, arguments: Dict[str, Any], session_id: str,
+        actor_id: str, role: str,
+    ) -> str:
+        worker = os.path.join(BASE_DIR, "sandbox_worker.py")
+        payload = json.dumps({"tool": name, "arguments": arguments}, ensure_ascii=False)
+        result = subprocess.run(
+            [sys.executable, "-I", worker], input=payload, capture_output=True,
+            text=True, timeout=10, creationflags=_NO_WINDOW,
+            cwd=DATA_DIR, env={"PATH": os.environ.get("PATH", "")},
+        )
+        try:
+            response = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError:
+            response = {"ok": False, "error": "worker returned invalid output"}
+        outcome = "success" if response.get("ok") else "error"
+        audit_store.append(
+            "tool.execute", outcome, actor_id=actor_id, actor_role=role,
+            session_id=session_id, target=name,
+            details={"arguments": arguments, "result": response.get("result"), "error": response.get("error")},
+        )
+        if not response.get("ok"):
+            return f"⚠️ Tool `{name}` ทำงานไม่สำเร็จ: {response.get('error', 'unknown error')}"
+        return f"✅ ผลจาก `{name}`:\n```json\n{json.dumps(response['result'], ensure_ascii=False, indent=2)[:3000]}\n```"
+
+    def execute_confirmed_tool(self, pending: Dict[str, object]) -> str:
+        name = str(pending.get("tool", ""))
+        arguments = pending.get("arguments", {})
+        if name == "open_app" and isinstance(arguments, dict):
+            result = self._open(str(arguments.get("target", "")))
+            audit_store.append(
+                "tool.execute", "success", actor_id=str(pending.get("actor_id", "anonymous")),
+                actor_role=str(pending.get("role", "admin")), target=name,
+                details={"action_id": pending.get("id"), "arguments": arguments},
+            )
+            return result
+        return "ไม่รู้จัก Tool ที่รอการยืนยันครับ"
 
     def _execute(self, cmd: str, session_id: str) -> str:
         upper = cmd.upper()
@@ -1090,21 +1507,26 @@ class CommandAgent:
             log.warning("Shell command blocked (ENABLE_SHELL_COMMANDS=false): %s", command)
             return "🚫 การรันคำสั่ง Shell ถูกปิดอยู่ครับ (ตั้งค่า ENABLE_SHELL_COMMANDS=true เพื่อเปิด)"
 
-        # ANY delete/destroy-ish command is held for a password re-confirmation —
-        # even for an already-logged-in admin session — before it actually runs.
-        if self._needs_data_confirmation(command):
+        # Raw shell is a high-impact capability. By default every command is
+        # proposed first and requires a fresh password confirmation. The
+        # destructive detector remains mandatory even if an operator disables
+        # confirmation for low-risk commands in a private environment.
+        destructive = self._needs_data_confirmation(command)
+        if self._settings.require_shell_confirmation or destructive:
+            action_id = f"act_{secrets.token_urlsafe(8)}"
             store.set_pending_action(session_id, {
-                "kind": "shell", "command": command, "created": time.time(),
+                "id": action_id, "kind": "shell", "command": command,
+                "created": time.time(), "destructive": destructive,
             })
             log.warning(
-                "Destructive-looking command HELD for password confirmation (session %s...): %s",
-                session_id[:8], command,
+                "Shell action HELD for confirmation (action=%s, destructive=%s, session %s...): %s",
+                action_id, destructive, session_id[:8], command,
             )
             return (
-                "⚠️ **คำสั่งนี้อาจลบ/ทำลายข้อมูลครับ**\n"
+                "⚠️ **คำสั่ง Shell รอการอนุมัติครับ**\n"
                 f"`{command}`\n\n"
-                "เพื่อป้องกันความเสียหายต่อข้อมูลองค์กร กรุณายืนยันด้วยรหัสผ่านแอดมินอีกครั้งก่อนดำเนินการ "
-                "พิมพ์: `[ยืนยันลบ: รหัสผ่านของท่าน]`\n"
+                f"รหัสรายการ: `{action_id}`\n"
+                "กรุณาตรวจคำสั่งด้านบน แล้วพิมพ์: `[ยืนยันคำสั่ง: รหัสผ่านของท่าน]`\n"
                 "(คำขอนี้จะหมดอายุใน 2 นาทีเพื่อความปลอดภัย)"
             )
 
@@ -1150,10 +1572,10 @@ class CommandAgent:
 
 agent = CommandAgent(settings)
 
-# Recognizes the user re-entering the admin password to confirm a held
-# destructive action, e.g. "[ยืนยันลบ: mypassword123]" or "[confirm delete: ...]".
+# Recognizes the user re-entering the admin password to confirm a held shell
+# action, e.g. "[ยืนยันคำสั่ง: mypassword123]" or "[confirm action: ...]".
 _CONFIRM_DESTRUCTIVE_RE = re.compile(
-    r"^\s*\[(?:ยืนยันลบ|ยืนยัน|confirm\s*delete|confirm)\s*:\s*(.*)\]\s*$",
+    r"^\s*\[(?:ยืนยันคำสั่ง|ยืนยันลบ|ยืนยัน|confirm\s*(?:action|command|delete)?|confirm)\s*:\s*(.*)\]\s*$",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -1192,9 +1614,12 @@ def handle_confirm_destructive(session_id: str, user_msg: str) -> Optional[str]:
         return "🚫 รหัสผ่านไม่ถูกต้องครับ คำสั่งที่รอดำเนินการถูกยกเลิกเพื่อความปลอดภัย กรุณาสั่งคำสั่งเดิมใหม่หากยังต้องการดำเนินการ"
 
     store.clear_pending_action(session_id)
-    log.warning("Destructive action CONFIRMED by password (session %s...): %s", session_id[:8], pending.get("command"))
+    log.warning("Shell action CONFIRMED by password (action=%s, session %s...): %s",
+                pending.get("id", "unknown"), session_id[:8], pending.get("command"))
     if pending.get("kind") == "shell":
         return agent.execute_confirmed_shell(str(pending.get("command", "")))
+    if pending.get("kind") == "structured_tool":
+        return agent.execute_confirmed_tool(pending)
     return "ไม่รู้จักประเภทคำสั่งที่รอการยืนยันครับ"
 
 
@@ -1217,7 +1642,10 @@ def _history_for_model(history: List[Dict[str, str]], is_admin: bool) -> List[Di
 # --------------------------------------------------------------------------- #
 #  System prompt builder
 # --------------------------------------------------------------------------- #
-def build_system_prompt(weather: str, document: str, is_admin: bool = False) -> str:
+def build_system_prompt(
+    weather: str, document: str, is_admin: bool = False,
+    conversation_summary: str = "", role: str = "staff", knowledge_context: str = "",
+) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cpu = psutil.cpu_percent()
     mem = psutil.virtual_memory().percent
@@ -1225,7 +1653,8 @@ def build_system_prompt(weather: str, document: str, is_admin: bool = False) -> 
     battery_pct = battery.percent if battery else 100
 
     company = settings.company_name
-    kb = knowledge.text
+    kb = knowledge_context
+    effective_role = "admin" if is_admin else role
 
     prompt = f"""You are J.A.R.V.I.S., a state-of-the-art, highly intelligent, and modern AI Assistant operating directly on this Windows PC.
 Your personality is a blend of Tony Stark's original J.A.R.V.I.S. and modern AI like ChatGPT or Claude. 
@@ -1233,9 +1662,18 @@ Your personality is a blend of Tony Stark's original J.A.R.V.I.S. and modern AI 
 - You can use appropriate emojis to make the conversation feel natural and modern.
 - Address the user politely as 'คุณ' (You) or 'บอส' (Boss) depending on the context, keeping it natural and not overly robotic.
 - Provide clear, well-structured, and concise answers. Use markdown formatting (bolding, lists) to organize information nicely.
+- TABLES: the frontend renders standard markdown pipe tables (`| col | col |` header, `|---|---|` separator, then rows) as a real styled table. Use one whenever comparing structured rows of data instead of a wall of bullet points.
+- CHARTS: for a quick visual comparison of numbers (e.g. sales by month, ticket counts by status), you may emit a fenced ```chart block containing ONLY JSON — the frontend renders it as a bar chart, not as visible code. Schema: `{{"title": "...", "labels": ["a","b"], "values": [1,2]}}` for one series, or `{{"title": "...", "labels": [...], "series": [{{"name":"A","values":[...]}}, {{"name":"B","values":[...]}}]}}` for up to 3 series to compare. Keep it to a handful of categories — this renders inside a chat bubble, not a dashboard. Don't use it for anything that isn't genuinely a small set of comparable numbers.
 - You are highly capable, proactive, and friendly.
 - You are perfectly fluent in Thai — write natural, modern, native-level Thai. NEVER apologize for your language ability, never say you are "English-focused" or "English-US focused"; simply answer naturally and confidently.
 - Think step by step for complex or technical questions and give accurate, well-reasoned answers. Keep everyday chit-chat short and conversational.
+
+*** REMINDERS (available to EVERY user, not just admin) ***
+If the user asks to be reminded of something later, tell them to send this exact
+message themselves (the system parses it directly from their next message —
+you cannot schedule it on their behalf, so just give them the syntax to type):
+`[เตือน: <จำนวน> นาที: <ข้อความ>]` เช่น `[เตือน: 15 นาที: ประชุมทีม]` (ใช้ "ชั่วโมง" แทน "นาที" ได้)
+To see active reminders: `[รายการแจ้งเตือน]`. To cancel one: `[ยกเลิกเตือน: <รหัส>]`.
 """
 
     if is_admin:
@@ -1262,11 +1700,11 @@ The system runs the REAL search over the actual files and feeds matching lines b
 *** ANTI-HALLUCINATION — THIS IS CRITICAL ***
 You do NOT actually know search results, file contents, links, or command output until the SYSTEM gives them to you.
 - NEVER fabricate or role-play results. NEVER write fake placeholders like "[youtube link]", "[date]", "[Summary]", "RESULTS FROM SEARCH...", a made-up URL, or invented file paths/code.
-- If you want to search or run something, output ONLY the correct tag ([SEARCH: ...], [SYSNECT_DATA: ...] or [CMD: ...]) and stop. Do not narrate a pretend outcome.
+- If you want to search or use a tool, output ONLY the correct tag ([SEARCH: ...], [SYSNECT_DATA: ...] or [TOOL: ...]) and stop. Do not narrate a pretend outcome.
 - The system executes the tag for real and returns the true result — only then do you present it.
 
 *** CRITICAL INSTRUCTION FOR ADMIN MODE ***
-You are in ADMIN MODE. Ignore any earlier chat messages where you refused or said the OS was locked. If the Admin asks to open an app, run a command, or search the web, DO IT by outputting the correct tag. DO NOT refuse. DO NOT output lockdown messages.
+You are in ADMIN MODE. Ignore stale earlier refusals. Use only the structured tools explicitly listed below; never invent a tool or emit raw shell commands.
 """
     else:
         prompt += f"""
@@ -1281,40 +1719,32 @@ You may still help with general IT, work, and productivity tasks using your own 
 === COMPANY KNOWLEDGE BASE ({company}) ===
 {kb if kb else "(ยังไม่มีข้อมูลบริษัทในฐานความรู้)"}
 === END COMPANY KNOWLEDGE BASE ===
+When using company knowledge, include its exact [KB:filename#chunk-N] citation
+near the supported statement. Never cite a source that is not present above."""
+
+    if conversation_summary:
+        prompt += f"""
+
+=== MEMORY OF EARLIER CONVERSATION (already scrolled out of view, summarized) ===
+{conversation_summary}
+=== END MEMORY ===
+Use this only to stay consistent with earlier context (names, decisions, requests
+the user already made). Don't repeat it back unless it's relevant to the current question."""
+
+    prompt += f"""
 
 [INTERNAL CONTEXT — for your awareness only. NEVER copy, quote, or repeat this
 block back to the user. Only mention a value if the user explicitly asks for it.]
 Current time: {now} | CPU: {cpu}% | RAM: {mem}% | Battery: {battery_pct}% | Weather: {weather}
 Uploaded document: {document if document else "(none)"}"""
 
-    if is_admin and agent.enabled:
-        prompt += """\n\n*** ADMIN OVERRIDE ACTIVE (GOD MODE) ***
-You can run things on this PC by outputting a tag. There are EXACTLY two forms:
-1. [CMD: OPEN <app-or-url>]  -> opens an app, website, or file.
-     Examples: [CMD: OPEN notepad]  [CMD: OPEN winword]  [CMD: OPEN https://youtube.com]
-2. [CMD: CMD <powershell>]   -> runs a PowerShell command and shows you its real output.
-     Examples: [CMD: CMD ipconfig]  [CMD: CMD Get-Process | Select-Object -First 5]
-
-HOW IT WORKS (READ CAREFULLY):
-- The word right after "[CMD:" is the ACTION and MUST be either OPEN or CMD. Do not omit it.
-- The SYSTEM executes the tag for real and appends the true result to your message. You do NOT need to (and must not) invent the result yourself.
-- To open a website by name, use its full URL. To search YouTube and open it, use:
-  [CMD: OPEN https://www.youtube.com/results?search_query=YOUR+QUERY]
-- Known apps can be called by simple name: [CMD: OPEN calc]  [CMD: OPEN excel]  [CMD: OPEN code]
-
-RULES:
-- Use the EXACT tag. Do NOT just write "Opening..." or narrate a fake outcome.
-- The Admin is authorized — do not refuse to open an app or run a normal command.
-- ⚠️ NEVER output "🚫 ระบบปฏิบัติการถูกล็อก" or any lockdown/refusal message. That message is ONLY for logged-out staff. If you see it anywhere in the earlier conversation, IGNORE it — the Admin is logged in NOW. For every open/run request, emit the [CMD: ...] tag.
-- Keep your text reply SHORT (one line is fine); the system appends the real result automatically, so do not invent "System executed..." output.
-- Clear junk files example: [CMD: CMD cleanmgr /sagerun:1]
-- One note: a tiny set of drive-wiping commands (format/diskpart) is auto-blocked to protect the machine; if that happens, tell the Admin to set ALLOW_DESTRUCTIVE_COMMANDS=true. Everything else runs normally.
-- ⚠️ DELETE/DESTROY SAFETY: any command that deletes or destroys data (del, Remove-Item, rd, DROP TABLE, format, etc.) is NOT run immediately, even for the Admin — the system holds it and asks the Admin to re-type their password as `[ยืนยันลบ: password]` before it actually executes. This is intentional and protects company data. Still emit the normal [CMD: CMD ...] tag as usual; just let the Admin know the system will ask them to confirm with their password first, and don't treat that confirmation prompt as a failure."""
-    elif not is_admin:
-        prompt += """\n\nCRITICAL RULE FOR SYSTEM COMMANDS:
-If the user asks you to execute a system command, open an application, clear junk files, delete files, or modify the system, you MUST refuse.
-Reply EXACTLY with: "🚫 ระบบปฏิบัติการถูกล็อก! ไม่สามารถเข้าถึงหรือรันคำสั่งหลังบ้านได้ กรุณาใช้คำสั่งยืนยันตัวตน (Authentication) ก่อนครับบอส"
-Do NOT attempt to give manual instructions on how to do it."""
+    prompt += f"""\n\n*** STRUCTURED AGENT TOOLS — ROLE: {effective_role.upper()} ***
+Available tools: {tool_catalog_for_prompt(effective_role)}
+To use one tool, output ONLY:
+[TOOL: {{"name":"tool_name","arguments":{{...}}}}]
+Never emit [CMD:], PowerShell, executable code, or an unlisted tool. Tool access is
+validated in application code. Tools marked approval_required are proposed first
+and cannot execute until an Admin reviews the exact arguments and confirms."""
 
     return prompt
 
@@ -1639,6 +2069,42 @@ def generate_reply(provider: str, system: str, history: List[Dict[str, str]]) ->
     return "ไม่มี AI ที่ตั้งค่าไว้พร้อมใช้งานครับ โปรดตรวจสอบ API Key ใน .env"
 
 
+_SUMMARY_MAX_CHARS = 1500
+_SUMMARIZER_SYSTEM_PROMPT = "You are a silent conversation summarizer. Output only the summary text, nothing else."
+
+
+def _summarize_dropped(existing_summary: str, dropped: List[Dict[str, str]]) -> str:
+    """Folds messages about to be evicted from a session's short-term history
+    (beyond max_history) into a compact rolling summary, so long-run context —
+    names, decisions, ongoing tasks — survives past the trim window instead of
+    being lost outright. Runs on a lightweight/free-tier-friendly provider
+    (gemini -> groq -> ollama) independent of whichever model the user is
+    actually chatting with, so it never competes with Claude's paid quota."""
+    convo = "\n".join(f"{m.get('role')}: {(m.get('content') or '')[:500]}" for m in dropped)
+    prompt = (
+        "สรุปบทสนทนาต่อไปนี้แบบกระชับที่สุดเป็นภาษาไทย เก็บเฉพาะข้อเท็จจริง ชื่อ การตัดสินใจ "
+        "และสิ่งที่ผู้ใช้ขอให้จำ ไม่ต้องทักทายหรือใส่ความเห็นส่วนตัว ตอบเป็นข้อความสรุปล้วนๆ ไม่เกิน 300 คำ:\n\n"
+        f"สรุปก่อนหน้า: {existing_summary or '(ไม่มี)'}\n\n"
+        f"บทสนทนาที่ต้องรวมเข้าไปในสรุป:\n{convo}\n\n"
+        "สรุปใหม่ (รวมของเก่ากับของใหม่เข้าด้วยกัน):"
+    )
+    try:
+        text = generate_reply("gemini", _SUMMARIZER_SYSTEM_PROMPT, [{"role": "user", "content": prompt}])
+        # Strip the "_(⚠️ switched provider)_" disclaimer generate_reply()
+        # prepends on fallback — it's meant for chat replies, not for content
+        # going into the stored summary.
+        text = re.sub(r"^_\(⚠️.*?\)_\n\n", "", text.strip(), flags=re.DOTALL).strip()
+        # generate_reply() returns friendly Thai error strings instead of raising
+        # on total failure (no provider configured) — don't let that overwrite
+        # a perfectly good existing summary.
+        if not text or text.startswith(("ระบบ", "ไม่มี AI", "⚠️")):
+            return existing_summary
+        return text[:_SUMMARY_MAX_CHARS]
+    except Exception as exc:  # noqa: BLE001 - summarization must never break chat
+        log.error("Conversation summarization failed: %s", exc)
+        return existing_summary
+
+
 def _chat_gemini_stream(system: str, history: List[Dict[str, str]]):
     """Yield reply text chunks from Gemini (real streaming for a modern UX)."""
     import google.generativeai as genai
@@ -1769,7 +2235,7 @@ def fallback_reply(user_msg: str) -> str:
 # hand an attacker a full map of every endpoint + schema. Not needed in prod.
 app = FastAPI(
     title="J.A.R.V.I.S. AI Agent Backend",
-    version="9.5.0",
+    version="10.0.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -1788,6 +2254,9 @@ MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "8000"))  # cap chat mess
 # still read the security state + an already-authenticated admin can lift it.
 _LOCKDOWN_ALLOWED_PATHS = {
     "/api/health", "/api/security/status", "/api/security/clear", "/api/security/lockdown",
+}
+_PUBLIC_API_PATHS = {
+    "/api/health", "/api/session", "/api/security/status", "/api/security/clear",
 }
 
 
@@ -1814,8 +2283,30 @@ async def security_middleware(request: Request, call_next):
         return JSONResponse(status_code=503, content={
             "status": "locked",
             "message": "🛡️ ระบบตรวจพบภัยคุกคามด้านความปลอดภัย — ปิดระบบหลังบ้านชั่วคราวเพื่อป้องกันข้อมูล กรุณารอสักครู่ครับ",
-            "security": st,
+            "security": {
+                key: st[key]
+                for key in ("state", "locked_down", "indefinite", "seconds_remaining")
+            },
         })
+
+    # Every API except the minimal liveness/bootstrap/break-glass surface needs
+    # a server-issued bearer credential. The token determines the session;
+    # query/body session_id values are only compatibility claims and are checked
+    # again by session-scoped handlers before any data is read or changed.
+    if (
+        request.method != "OPTIONS"
+        and path.startswith("/api/")
+        and path not in _PUBLIC_API_PATHS
+    ):
+        credential = session_auth.validate_credential(_bearer_token(request))
+        if not credential:
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "message": "กรุณาเริ่ม session ใหม่หรือเข้าสู่ระบบอีกครั้งครับ"},
+            )
+        request.state.session_id = credential.session_id
+        request.state.actor_id = credential.actor_id
+        request.state.role = credential.role
 
     response = await call_next(request)
 
@@ -1843,14 +2334,51 @@ class ChatRequest(BaseModel):
     session_id: str = "default"
 
 
+@app.post("/api/session")
+def create_session(http_request: Request):
+    """Create an opaque, server-owned staff session credential."""
+    ip = client_ip(http_request)
+    if not session_rate_limiter.check(ip):
+        wait = session_rate_limiter.retry_after(ip)
+        raise HTTPException(status_code=429, detail=f"Retry in {wait} seconds")
+    email = ""
+    if settings.trust_cloudflare_access_headers:
+        email = http_request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
+    if settings.require_org_identity and not email:
+        raise HTTPException(status_code=401, detail="Organizational identity required")
+    if email and settings.org_allowed_domains:
+        domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+        allowed = {item.lower() for item in settings.org_allowed_domains}
+        if domain not in allowed:
+            audit_store.append("session.issue", "denied", actor_id=email, target=domain, details={"reason": "domain"})
+            raise HTTPException(status_code=403, detail="Email domain is not authorized")
+    role = "staff"
+    if email in {item.lower() for item in settings.manager_emails}:
+        role = "manager"
+    if email in {item.lower() for item in settings.admin_emails}:
+        role = "admin"
+    actor_id = email or "anonymous"
+    credential = session_auth.issue(actor_id=actor_id, role=role)
+    audit_store.append(
+        "session.issue", "success", actor_id=actor_id, actor_role=role,
+        session_id=credential["session_id"], details={"ip": ip},
+    )
+    log.info("Staff session issued (session %s..., ip=%s)", credential["session_id"][:16], ip)
+    return {
+        "status": "ok", **credential, "actor_id": actor_id,
+        "expires_in": settings.session_token_ttl_seconds,
+    }
+
+
 @app.get("/api/health")
 def health():
+    kb_info = knowledge.info()
     return {
         "status": "online",
         "company": settings.company_name,
         "assistant": settings.assistant_name,
         "active_ai": settings.active_ai,
-        "knowledge": knowledge.info(),
+        "knowledge": {"files": len(kb_info["files"]), "chars": kb_info["chars"]},
         "command_execution": settings.enable_command_execution,
         "providers_configured": {
             "claude": bool(settings.claude_api_key),
@@ -1878,17 +2406,49 @@ def get_system_sensors():
 
 
 @app.get("/api/system-log")
-def get_system_log():
+def get_system_log(http_request: Request):
     """Most-recent-first feed of real backend log lines (admin logins, commands
     run, knowledge reloads...) for the frontend's SYSTEM LOG panel."""
+    _admin_session(http_request)
     return {"entries": list(_log_buffer)[::-1][:20]}
 
 
+@app.get("/api/audit/events")
+def get_audit_events(http_request: Request, limit: int = 100):
+    _admin_session(http_request)
+    return {"events": audit_store.recent(limit)}
+
+
+@app.get("/api/audit/verify")
+def verify_audit_events(http_request: Request):
+    _admin_session(http_request)
+    return audit_store.verify_chain()
+
+
+@app.get("/api/reminders/pending")
+def get_pending_reminders(http_request: Request, session_id: str = "default"):
+    """Polled by the frontend every ~20s; returns reminders that just became
+    due for this session (each is returned exactly once, then dropped)."""
+    session_id = _bound_session(http_request, session_id)
+    due = reminders.pop_due(session_id)
+    return {"due": [{"id": r.id, "message": r.message} for r in due]}
+
+
+@app.get("/api/reminders")
+def get_reminders(http_request: Request, session_id: str = "default"):
+    session_id = _bound_session(http_request, session_id)
+    return {"reminders": [
+        {"id": r.id, "message": r.message, "due_at": r.due_at}
+        for r in reminders.list_active(session_id)
+    ]}
+
+
 @app.get("/api/token-status")
-def get_token_status_endpoint():
+def get_token_status_endpoint(http_request: Request):
     """Per-provider token/request usage today, for the frontend's TOKEN
     STATUS panel — real counters accumulated from each API response's usage
     field, not an estimate."""
+    _admin_session(http_request)
     return get_token_status()
 
 
@@ -1914,13 +2474,17 @@ class ModelSwitchRequest(BaseModel):
 
 
 @app.post("/api/models/switch")
-def switch_model_endpoint(request: ModelSwitchRequest):
+def switch_model_endpoint(request: ModelSwitchRequest, http_request: Request):
     """Switch the active AI model from the web UI — same admin-only,
     global-effect switch as the `[เปลี่ยนโมเดล: ...]` chat command, just
     reachable from a dropdown instead of typed text."""
-    if not store.is_admin(request.session_id or "default"):
-        return {"status": "error", "message": "🚫 การเปลี่ยนโมเดล AI สงวนไว้สำหรับผู้ดูแลระบบครับ"}
+    _admin_session(http_request, request.session_id)
+    identity = _request_identity(http_request)
     reply = switch_active_model(request.model)
+    audit_store.append(
+        "model.switch", "success", actor_id=identity["actor_id"], actor_role=identity["role"],
+        session_id=identity["session_id"], target=settings.active_ai,
+    )
     return {"status": "ok", "message": reply, "active_ai": settings.active_ai}
 
 
@@ -1930,10 +2494,17 @@ class SecurityRequest(BaseModel):
 
 
 @app.get("/api/security/status")
-def security_status():
+def security_status(http_request: Request):
     """Live security posture for the frontend shield indicator. Always reachable,
     even during lockdown, so the UI can show the state and poll for recovery."""
-    return security_monitor.status()
+    status = security_monitor.status()
+    session_id = session_auth.validate(_bearer_token(http_request))
+    if session_id and store.is_admin(session_id):
+        return status
+    return {
+        key: status[key]
+        for key in ("state", "locked_down", "indefinite", "seconds_remaining")
+    }
 
 
 @app.post("/api/security/clear")
@@ -1944,7 +2515,11 @@ def security_clear(request: SecurityRequest, http_request: Request):
     works even with no prior session — the break-glass path for when nobody
     was logged in when the lockdown engaged."""
     ip = client_ip(http_request)
-    is_admin_session = store.is_admin(request.session_id or "default")
+    token_session = session_auth.validate(_bearer_token(http_request))
+    if token_session and request.session_id not in ("", "default"):
+        if not hmac.compare_digest(token_session, request.session_id):
+            raise HTTPException(status_code=403, detail="Session does not belong to this credential")
+    is_admin_session = bool(token_session and store.is_admin(token_session))
 
     override_ok = False
     if request.override_code:
@@ -1962,34 +2537,58 @@ def security_clear(request: SecurityRequest, http_request: Request):
         return {"status": "error", "message": "🚫 ต้องเป็นแอดมินที่ยืนยันตัวตนแล้ว หรือใส่ Security Code (Superadmin) ให้ถูกต้องครับ"}
 
     security_monitor.clear()
+    audit_store.append(
+        "security.clear", "success", actor_id=(token_session or "break-glass"),
+        actor_role=("admin" if is_admin_session else "break-glass"),
+        session_id=(token_session or ""), details={"override": override_ok, "ip": ip},
+    )
     log.warning("Security lockdown cleared (session=%s..., via_override_code=%s, ip=%s)",
                 (request.session_id or "default")[:8], override_ok, ip)
     return {"status": "ok", "message": "✅ ยกเลิกการล็อกดาวน์และรีเซ็ตประวัติภัยคุกคามแล้วครับ", **security_monitor.status()}
 
 
 @app.post("/api/security/lockdown")
-def security_lockdown(request: SecurityRequest):
+def security_lockdown(request: SecurityRequest, http_request: Request):
     """Admin can manually seal the backend (panic button)."""
-    if not store.is_admin(request.session_id or "default"):
-        return {"status": "error", "message": "🚫 ต้องเป็นแอดมินที่ยืนยันตัวตนแล้วเท่านั้นครับ"}
+    _admin_session(http_request, request.session_id)
+    identity = _request_identity(http_request)
     security_monitor.engage_manual("admin panic button")
+    audit_store.append(
+        "security.lockdown", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"],
+    )
     return {"status": "ok", "message": "🛑 สั่งล็อกดาวน์ระบบหลังบ้านแล้วครับ", **security_monitor.status()}
 
 
 @app.get("/api/knowledge")
-def get_knowledge():
+def get_knowledge(http_request: Request):
+    _admin_session(http_request)
     return knowledge.info()
 
 
 @app.post("/api/knowledge/reload")
-def reload_knowledge():
+def reload_knowledge(http_request: Request):
+    _admin_session(http_request)
     result = knowledge.reload()
     return {"status": "reloaded", **result}
 
 
+@app.get("/api/knowledge/search")
+def search_knowledge(http_request: Request, q: str, limit: int = 5):
+    identity = _request_identity(http_request)
+    results = rag_store.search(q[:500], identity["role"], limit)
+    audit_store.append(
+        "knowledge.search", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"],
+        details={"query": q[:200], "results": len(results)},
+    )
+    return {"results": results}
+
+
 @app.get("/api/training/status")
-def training_status():
+def training_status(http_request: Request):
     """Overview of the AI training pipeline: taught facts, saved logs, dataset."""
+    _admin_session(http_request)
     dataset_path = os.path.join(TRAINING_DIR, "dataset_sysnect.jsonl")
     dataset_examples = 0
     if os.path.isfile(dataset_path):
@@ -2033,33 +2632,34 @@ def _require_admin(session_id: str) -> Optional[dict]:
 
 
 @app.get("/api/knowledge/learned")
-def list_learned(session_id: str = "default"):
+def list_learned(http_request: Request, session_id: str = "default"):
     """List taught facts (admin only). Returns index + text for each."""
-    err = _require_admin(session_id)
-    if err:
-        return err
+    session_id = _admin_session(http_request, session_id)
     facts = _learned_facts()
     items = [{"index": i, "text": f} for i, f in enumerate(facts)]
     return {"status": "ok", "count": len(items), "facts": items, "kb": knowledge.info()}
 
 
 @app.post("/api/knowledge/teach")
-def api_teach(request: TeachRequest):
-    err = _require_admin(request.session_id)
-    if err:
-        return err
+def api_teach(request: TeachRequest, http_request: Request):
+    request.session_id = _admin_session(http_request, request.session_id)
+    identity = _request_identity(http_request)
     fact = " ".join((request.fact or "").split())
     if not fact:
         return {"status": "error", "message": "กรุณาพิมพ์ความรู้ที่จะสอนครับ"}
     info = teach_fact(fact)
+    audit_store.append(
+        "knowledge.teach", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"],
+        details={"characters": len(fact)},
+    )
     return {"status": "ok", "message": f"เรียนรู้แล้ว ({info['total']} รายการ)", **info}
 
 
 @app.post("/api/knowledge/forget")
-def api_forget(request: ForgetRequest):
-    err = _require_admin(request.session_id)
-    if err:
-        return err
+def api_forget(request: ForgetRequest, http_request: Request):
+    request.session_id = _admin_session(http_request, request.session_id)
+    identity = _request_identity(http_request)
     # Deleting knowledge is destructive — re-verify the admin password even
     # though this session is already logged in, so a hijacked/careless admin
     # session (or a friend at the keyboard) can't wipe data without the password.
@@ -2072,15 +2672,24 @@ def api_forget(request: ForgetRequest):
     if not result.get("ok"):
         return {"status": "error", "message": "ลบไม่สำเร็จ (ไม่พบรายการ)", **result}
     log.warning("Knowledge fact forgotten (session %s..., index=%d)", request.session_id[:8], request.index)
+    audit_store.append(
+        "knowledge.forget", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"],
+        details={"index": request.index},
+    )
     return {"status": "ok", "message": "ลบความรู้แล้ว", **result}
 
 
 @app.post("/api/training/build")
-def api_build_dataset(request: AdminRequest):
-    err = _require_admin(request.session_id)
-    if err:
-        return err
+def api_build_dataset(request: AdminRequest, http_request: Request):
+    request.session_id = _admin_session(http_request, request.session_id)
+    identity = _request_identity(http_request)
     result = build_training_dataset()
+    audit_store.append(
+        "training.build", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"],
+        details={"examples": result.get("examples", 0)},
+    )
     return {"status": "ok", **result}
 
 
@@ -2088,13 +2697,11 @@ def api_build_dataset(request: AdminRequest):
 #  Vision & Clipboard (OS-level access — admin-gated, same trust level as CMD)
 # --------------------------------------------------------------------------- #
 @app.get("/api/os/screenshot")
-def os_screenshot(session_id: str = "default"):
+def os_screenshot(http_request: Request, session_id: str = "default"):
     """Capture the boss's screen and return it as base64 PNG. The frontend
     feeds this straight into the existing /api/upload image pipeline, which
     already knows how to run it through Gemini vision — no new AI code needed."""
-    err = _require_admin(session_id)
-    if err:
-        return err
+    session_id = _admin_session(http_request, session_id)
     try:
         import pyautogui
 
@@ -2110,11 +2717,9 @@ def os_screenshot(session_id: str = "default"):
 
 
 @app.get("/api/os/clipboard")
-def os_clipboard(session_id: str = "default"):
+def os_clipboard(http_request: Request, session_id: str = "default"):
     """Return the current text on the boss's clipboard."""
-    err = _require_admin(session_id)
-    if err:
-        return err
+    session_id = _admin_session(http_request, session_id)
     try:
         import pyperclip
 
@@ -2137,7 +2742,7 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/auth/login")
 def auth_login(request: LoginRequest, http_request: Request):
-    session_id = request.session_id or "default"
+    session_id = _bound_session(http_request, request.session_id)
     ip = client_ip(http_request)
     if not login_rate_limiter.check(ip):
         wait = login_rate_limiter.retry_after(ip)
@@ -2158,8 +2763,18 @@ def auth_login(request: LoginRequest, http_request: Request):
     if not (user_ok and pass_ok):
         log.warning("Failed admin login attempt (session %s..., ip=%s)", session_id[:8], ip)
         security_monitor.record("failed_login", ip)
+        identity = _request_identity(http_request)
+        audit_store.append(
+            "auth.admin_login", "denied", actor_id=identity["actor_id"],
+            actor_role=identity["role"], session_id=identity["session_id"], details={"ip": ip},
+        )
         return {"status": "error", "message": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้องครับ"}
     store.set_admin(session_id, True)
+    identity = _request_identity(http_request)
+    audit_store.append(
+        "auth.admin_login", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"], details={"ip": ip},
+    )
     log.info("Admin login success (session %s...)", session_id[:8])
     return {
         "status": "success",
@@ -2168,16 +2783,27 @@ def auth_login(request: LoginRequest, http_request: Request):
 
 
 @app.post("/api/auth/logout")
-def auth_logout(request: LoginRequest):
-    session_id = request.session_id or "default"
+def auth_logout(request: LoginRequest, http_request: Request):
+    session_id = _bound_session(http_request, request.session_id)
+    identity = _request_identity(http_request)
     store.set_admin(session_id, False)
+    audit_store.append(
+        "auth.logout", "success", actor_id=identity["actor_id"],
+        actor_role=identity["role"], session_id=identity["session_id"],
+    )
     log.info("Admin logout (session %s...)", session_id[:8])
     return {"status": "success", "message": "🔒 **ADMIN MODE LOCKED**\nล็อกสิทธิ์ผู้ดูแลระบบเรียบร้อยครับ กลับสู่โหมดพนักงานปกติ"}
 
 
 @app.get("/api/auth/status")
-def auth_status(session_id: str = "default"):
+def auth_status(http_request: Request, session_id: str = "default"):
+    session_id = _bound_session(http_request, session_id)
     return {"is_admin": store.is_admin(session_id)}
+
+
+@app.get("/api/auth/me")
+def auth_me(http_request: Request):
+    return _request_identity(http_request)
 
 
 def check_connections() -> str:
@@ -2269,7 +2895,8 @@ def check_connections() -> str:
 
 
 @app.get("/api/chat/history")
-def get_chat_history(session_id: str = "default"):
+def get_chat_history(http_request: Request, session_id: str = "default"):
+    session_id = _bound_session(http_request, session_id)
     return {"history": store.get_history(session_id)}
 
 
@@ -2332,7 +2959,7 @@ def get_auto_routed_provider(user_msg: str) -> str:
 
 @app.post("/api/chat")
 def chat_with_jarvis(request: ChatRequest, http_request: Request):
-    session_id = request.session_id or "default"
+    session_id = _bound_session(http_request, request.session_id)
     user_msg = (request.message or "")[:MAX_MESSAGE_CHARS]
 
     ip = client_ip(http_request)
@@ -2352,7 +2979,7 @@ def chat_with_jarvis(request: ChatRequest, http_request: Request):
 
     log.info("Chat request (session %s..., provider=%s, ip=%s): %s", session_id[:8], provider, ip, user_msg[:200])
 
-    # Re-confirming a held destructive action (e.g. "[ยืนยันลบ: password]") takes
+    # Re-confirming a held shell action (e.g. "[ยืนยันคำสั่ง: password]") takes
     # priority over everything else — never send this to the AI model.
     confirm_reply = handle_confirm_destructive(session_id, user_msg)
     if confirm_reply is not None:
@@ -2387,6 +3014,31 @@ def chat_with_jarvis(request: ChatRequest, http_request: Request):
         reply = switch_active_model(switch_match.group(1))
         return {"reply": reply, "provider": settings.active_ai}
 
+    # --- Reminders (automation) ------------------------------------------ #
+    if user_msg.strip().lower() in _LIST_REMINDERS_TEXTS:
+        return {"reply": format_reminder_list(session_id), "provider": provider}
+
+    reminder = _extract_reminder(user_msg)
+    if reminder is not None:
+        r = reminders.add(session_id, reminder["text"], time.time() + reminder["seconds"])
+        unit_label = "ชั่วโมง" if reminder["unit_is_hours"] else "นาที"
+        amount_label = reminder["seconds"] // 3600 if reminder["unit_is_hours"] else reminder["seconds"] // 60
+        reply = (
+            f"⏰ **ตั้งการแจ้งเตือนแล้วครับบอส!** อีก {amount_label} {unit_label} "
+            f"ผมจะเตือนว่า: \"{reminder['text']}\"\n(รหัส: `{r.id}` — ยกเลิกได้ด้วย `[ยกเลิกเตือน: {r.id}]`)"
+        )
+        store.add_message(session_id, "user", user_msg)
+        store.add_message(session_id, "assistant", reply)
+        return {"reply": reply, "provider": provider}
+
+    cancel_match = re.match(r"^\s*\[(?:ยกเลิกเตือน|cancel\s*remind(?:er)?)\s*:\s*(\S+)\]\s*$", user_msg.strip(), re.IGNORECASE)
+    if cancel_match:
+        ok = reminders.cancel(session_id, cancel_match.group(1).strip())
+        reply = "✅ ยกเลิกการแจ้งเตือนแล้วครับบอส" if ok else "❌ ไม่พบการแจ้งเตือนรหัสนี้ครับ"
+        store.add_message(session_id, "user", user_msg)
+        store.add_message(session_id, "assistant", reply)
+        return {"reply": reply, "provider": provider}
+
     # --- AI Training commands ------------------------------------------- #
     fact = _extract_teach_fact(user_msg)
     if fact is not None:
@@ -2417,7 +3069,12 @@ def chat_with_jarvis(request: ChatRequest, http_request: Request):
     is_admin = store.is_admin(session_id)
     # In admin mode, drop stale "OS locked" refusals so the model can't copy them.
     history = _history_for_model(store.get_history(session_id), is_admin)
-    system = build_system_prompt(request.weather, store.get_document(session_id), is_admin)
+    effective_role = "admin" if is_admin else getattr(http_request.state, "role", "staff")
+    rag_context = rag_store.context(user_msg, effective_role)
+    system = build_system_prompt(
+        request.weather, store.get_document(session_id), is_admin,
+        store.get_summary(session_id), effective_role, rag_context,
+    )
 
     reply = generate_reply(provider, system, history)
 
@@ -2456,7 +3113,11 @@ def chat_with_jarvis(request: ChatRequest, http_request: Request):
         first_clean = re.sub(r"\[SYSNECT_DATA:\s*.*?\]", "", reply, flags=re.IGNORECASE).strip()
         reply = f"{first_clean}\n\n{second_reply}".strip() if first_clean else second_reply
 
-    reply = agent.process(reply, session_id, is_admin)
+    reply = agent.process(
+        reply, session_id, is_admin,
+        role=getattr(http_request.state, "role", "staff"),
+        actor_id=getattr(http_request.state, "actor_id", "anonymous"),
+    )
 
     if not reply:
         reply = fallback_reply(user_msg)
@@ -2471,7 +3132,7 @@ def chat_stream(request: ChatRequest, http_request: Request):
     """Streaming chat (Server-Sent Events) for a modern typewriter UX.
     Emits {"delta": "..."} chunks, then a final {"done": true, "reply": "..."}.
     """
-    session_id = request.session_id or "default"
+    session_id = _bound_session(http_request, request.session_id)
     user_msg = (request.message or "")[:MAX_MESSAGE_CHARS]
 
     def sse(payload: dict) -> str:
@@ -2518,7 +3179,12 @@ def chat_stream(request: ChatRequest, http_request: Request):
     is_admin = store.is_admin(session_id)
     # In admin mode, drop stale "OS locked" refusals so the model can't copy them.
     history = _history_for_model(store.get_history(session_id), is_admin)
-    system = build_system_prompt(request.weather, store.get_document(session_id), is_admin)
+    effective_role = "admin" if is_admin else getattr(http_request.state, "role", "staff")
+    rag_context = rag_store.context(user_msg, effective_role)
+    system = build_system_prompt(
+        request.weather, store.get_document(session_id), is_admin,
+        store.get_summary(session_id), effective_role, rag_context,
+    )
 
     def gen():
         parts: List[str] = []
@@ -2577,7 +3243,11 @@ def chat_stream(request: ChatRequest, http_request: Request):
             first_clean = re.sub(r"\[SYSNECT_DATA:\s*.*?\]", "", reply, flags=re.IGNORECASE).strip()
             reply = f"{first_clean}\n\n{''.join(parts3)}".strip() if first_clean else "".join(parts3)
 
-        cleaned = agent.process(reply, session_id, is_admin)
+        cleaned = agent.process(
+            reply, session_id, is_admin,
+            role=getattr(http_request.state, "role", "staff"),
+            actor_id=getattr(http_request.state, "actor_id", "anonymous"),
+        )
         if not cleaned:
             cleaned = fallback_reply(user_msg)
         store.add_message(session_id, "assistant", cleaned)
@@ -2588,7 +3258,8 @@ def chat_stream(request: ChatRequest, http_request: Request):
 
 
 @app.post("/api/upload")
-async def upload_document(file: UploadFile = File(...), session_id: str = "default"):
+async def upload_document(http_request: Request, file: UploadFile = File(...), session_id: str = "default"):
+    session_id = _bound_session(http_request, session_id)
     try:
         content = await file.read()
         # Defense-in-depth size cap (the request middleware also guards Content-Length).
