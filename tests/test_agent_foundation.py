@@ -47,6 +47,17 @@ class RoleAwareRagTests(unittest.TestCase):
 
 
 class StructuredToolTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.audit_directory = tempfile.TemporaryDirectory()
+        cls.original_audit_store = main.audit_store
+        main.audit_store = AuditStore(os.path.join(cls.audit_directory.name, "audit.db"))
+
+    @classmethod
+    def tearDownClass(cls):
+        main.audit_store = cls.original_audit_store
+        cls.audit_directory.cleanup()
+
     def test_role_and_argument_validation(self):
         call = validate_tool_call(
             {"name": "list_processes", "arguments": {"limit": 999}}, "manager"

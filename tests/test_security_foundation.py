@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 
 from fastapi.testclient import TestClient
@@ -9,7 +10,15 @@ from backend import main
 class SecurityFoundationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.audit_directory = tempfile.TemporaryDirectory()
+        cls.original_audit_store = main.audit_store
+        main.audit_store = main.AuditStore(os.path.join(cls.audit_directory.name, "audit.db"))
         cls.client = TestClient(main.app)
+
+    @classmethod
+    def tearDownClass(cls):
+        main.audit_store = cls.original_audit_store
+        cls.audit_directory.cleanup()
 
     def issue_session(self):
         response = self.client.post("/api/session")
