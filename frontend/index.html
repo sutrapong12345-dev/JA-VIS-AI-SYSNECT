@@ -1525,7 +1525,7 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = 'https://msie-mounts-gender-executed.trycloudflare.com';
+const API_BASE = 'https://api.trycloudflare.com';
 
 // Session identity is issued by the backend. A client-generated ID is never an
 // authentication credential and cannot be used to open another user's session.
@@ -2134,7 +2134,7 @@ function addMessage(role, text) {
   msg.className = `chat-msg ${role}` + (role === 'user' && isAdmin ? ' admin' : '');
   const roleEl = document.createElement('div');
   roleEl.className = 'role';
-  roleEl.textContent = role === 'user' ? (isAdmin ? 'SYSNECT ADMIN' : 'SYSNECT STAFF') : 'J.A.R.V.I.S.';
+  roleEl.textContent = role === 'user' ? currentRoleLabel() : 'J.A.R.V.I.S.';
   const textEl = document.createElement('div');
   textEl.className = 'text';
   
@@ -2484,10 +2484,18 @@ function closeAuthModal() {
   authModal.hidden = true;
 }
 let isAdmin = false;
+let currentOrgRole = 'staff';
+let currentActorId = 'anonymous';
+function currentRoleLabel() {
+  if (isAdmin) return 'SYSNECT ADMIN';
+  return currentOrgRole === 'manager' ? 'SYSNECT MANAGER' : 'SYSNECT STAFF';
+}
 function setAdminBadge(on) {
   isAdmin = !!on;
-  const label = on ? 'SYSNECT ADMIN' : 'SYSNECT STAFF';
-  const role = on ? 'โหมดผู้ดูแลระบบ · GOD MODE 🔓' : 'โหมดพนักงาน · จำกัดสิทธิ์';
+  const label = currentRoleLabel();
+  const role = on
+    ? 'โหมดผู้ดูแลระบบ · ยืนยันตัวตนแล้ว 🔓'
+    : (currentOrgRole === 'manager' ? 'โหมดผู้จัดการ · สิทธิ์ระดับแผนก' : 'โหมดพนักงาน · จำกัดสิทธิ์');
   const nameEl = document.getElementById('profile-name');
   const menuName = document.getElementById('profile-menu-name');
   const menuRole = document.getElementById('profile-menu-role');
@@ -2514,7 +2522,7 @@ function setAdminBadge(on) {
     msg.classList.toggle('admin', on);
     const roleEl = msg.querySelector('.role');
     if (roleEl) {
-      roleEl.textContent = on ? 'SYSNECT ADMIN' : 'SYSNECT STAFF';
+      roleEl.textContent = currentRoleLabel();
     }
   });
 }
@@ -2789,6 +2797,12 @@ async function doLogout() {
 // Restore the ADMIN badge after a page refresh (session may still be unlocked)
 async function fetchAuthStatus() {
   try {
+    const meResponse = await apiFetch('/api/auth/me');
+    if (meResponse.ok) {
+      const me = await meResponse.json();
+      currentOrgRole = me.role || 'staff';
+      currentActorId = me.actor_id || 'anonymous';
+    }
     const r = await apiFetch('/api/auth/status?session_id=' + encodeURIComponent(sessionId));
     const d = await r.json();
     setAdminBadge(!!d.is_admin);
@@ -2830,7 +2844,7 @@ function addImageMessage(role, file) {
   msg.className = `chat-msg ${role}` + (role === 'user' && isAdmin ? ' admin' : '');
   const roleEl = document.createElement('div');
   roleEl.className = 'role';
-  roleEl.textContent = role === 'user' ? (isAdmin ? 'SYSNECT ADMIN' : 'SYSNECT STAFF') : 'J.A.R.V.I.S.';
+  roleEl.textContent = role === 'user' ? currentRoleLabel() : 'J.A.R.V.I.S.';
   const textEl = document.createElement('div');
   textEl.className = 'text';
   
