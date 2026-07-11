@@ -198,6 +198,14 @@ class Settings:
     groq_base_url: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
     groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+    # Cerebras (OpenAI-compatible cloud — 1M tokens/day free tier, fastest inference)
+    # Default gemma-4-31b: best natural Thai of the free catalog and NOT a
+    # reasoning model. gpt-oss-120b / zai-glm-4.7 spend hidden "reasoning"
+    # tokens out of max_tokens, which can truncate or blank the visible reply.
+    cerebras_api_key: str = os.getenv("CEREBRAS_API_KEY", "")
+    cerebras_base_url: str = os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1")
+    cerebras_model: str = os.getenv("CEREBRAS_MODEL", "gemma-4-31b")
+
     # Generation
     max_tokens: int = int(os.getenv("MAX_TOKENS", "1024"))
     max_history: int = int(os.getenv("MAX_HISTORY", "20"))
@@ -1941,6 +1949,29 @@ def _chat_groq(system: str, history: List[Dict[str, str]]) -> str:
     return response.choices[0].message.content
 
 
+def _chat_cerebras(system: str, history: List[Dict[str, str]]) -> str:
+    from openai import OpenAI
+
+    if not settings.cerebras_api_key:
+        raise ProviderNotConfigured("CEREBRAS_API_KEY")
+
+    client = OpenAI(api_key=settings.cerebras_api_key, base_url=settings.cerebras_base_url)
+    messages = [{"role": "system", "content": system}] + history
+    try:
+        response = client.chat.completions.create(
+            model=settings.cerebras_model,
+            messages=messages,
+            max_tokens=settings.max_tokens,
+        )
+    except Exception as exc:
+        log.error("Cerebras error: %s", exc)
+        raise RuntimeError(f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกล Cerebras ครับท่าน: {exc}") from exc
+
+    if getattr(response, "usage", None):
+        _record_usage("cerebras", response.usage.total_tokens)
+    return response.choices[0].message.content
+
+
 _PROVIDERS = {
     "claude": _chat_anthropic,
     "anthropic": _chat_anthropic,
@@ -1948,6 +1979,7 @@ _PROVIDERS = {
     "google": _chat_gemini,
     "ollama": _chat_ollama,
     "groq": _chat_groq,
+    "cerebras": _chat_cerebras,
 }
 
 # Aliases the admin might type/say -> canonical provider key. "auto" isn't in
@@ -1958,9 +1990,10 @@ _MODEL_ALIASES = {
     "gemini": "gemini", "google": "gemini",
     "ollama": "ollama", "local": "ollama",
     "groq": "groq",
+    "cerebras": "cerebras", "cb": "cerebras",
     "auto": "auto", "อัตโนมัติ": "auto",
 }
-_MODEL_DISPLAY_ORDER = ("claude", "gemini", "groq", "ollama")
+_MODEL_DISPLAY_ORDER = ("claude", "gemini", "cerebras", "groq", "ollama")
 
 
 def _provider_configured(name: str) -> bool:
@@ -1970,6 +2003,8 @@ def _provider_configured(name: str) -> bool:
         return bool(settings.gemini_api_key)
     if name == "groq":
         return bool(settings.groq_api_key)
+    if name == "cerebras":
+        return bool(settings.cerebras_api_key)
     if name in ("ollama", "auto"):
         return True  # ollama needs no key (local); auto just routes to whichever is configured
     return False
@@ -1981,6 +2016,7 @@ def _provider_model_label(name: str) -> str:
         "gemini": settings.gemini_model,
         "ollama": settings.ollama_model,
         "groq": settings.groq_model,
+        "cerebras": settings.cerebras_model,
         "auto": "เลือกอัตโนมัติตามคำถาม",
     }.get(name, "-")
 
@@ -2001,7 +2037,7 @@ def switch_active_model(raw_name: str) -> str:
     name = _MODEL_ALIASES.get((raw_name or "").strip().lower())
     if not name:
         return (
-            f"❌ ไม่รู้จักโมเดล `{raw_name}` ครับ โมเดลที่ใช้ได้: claude, gemini, groq, ollama, auto\n"
+            f"❌ ไม่รู้จักโมเดล `{raw_name}` ครับ โมเดลที่ใช้ได้: claude, gemini, cerebras, groq, ollama, auto\n"
             "พิมพ์ `[รายการโมเดล]` เพื่อดูรายละเอียดครับ"
         )
     if not _provider_configured(name):
@@ -2017,7 +2053,8 @@ def switch_active_model(raw_name: str) -> str:
 # active provider is exhausted, fall through to the next configured provider
 # — ollama is always last since it's local/unlimited (lower quality, but never
 # fully down). Only triggers on quota/rate-limit errors, never on real bugs.
-_FALLBACK_CHAIN = ["gemini", "groq", "ollama"]
+# Cerebras sits ahead of Groq: 1M free tokens/day vs Groq's 100K.
+_FALLBACK_CHAIN = ["gemini", "cerebras", "groq", "ollama"]
 
 
 # Gemini's free-tier requests/day cap varies WILDLY by model — verified live
@@ -2050,6 +2087,7 @@ _DAILY_CAPS = {
     "claude": {"metric": None, "cap": None},
     "gemini": {"metric": "requests", "cap": None},
     "groq": {"metric": "tokens", "cap": 100_000},
+    "cerebras": {"metric": "tokens", "cap": 1_000_000},
     "ollama": {"metric": None, "cap": None},
 }
 _TOKEN_USAGE: Dict[str, Dict[str, Any]] = {
@@ -2247,6 +2285,12 @@ def _stream_one_provider(provider: str, system: str, history: List[Dict[str, str
         yield from _chat_openai_compat_stream(
             settings.groq_api_key, settings.groq_base_url, settings.groq_model,
             system, history, usage_provider="groq")
+    elif provider == "cerebras":
+        if not settings.cerebras_api_key:
+            raise ProviderNotConfigured("CEREBRAS_API_KEY")
+        yield from _chat_openai_compat_stream(
+            settings.cerebras_api_key, settings.cerebras_base_url, settings.cerebras_model,
+            system, history, usage_provider="cerebras")
     elif provider == "ollama":
         yield from _chat_openai_compat_stream(
             settings.ollama_api_key or "ollama", settings.ollama_base_url,
@@ -2467,12 +2511,14 @@ def health():
             "gemini": bool(settings.gemini_api_key),
             "ollama": True,
             "groq": bool(settings.groq_api_key),
+            "cerebras": bool(settings.cerebras_api_key),
         },
         "models": {
             "claude": settings.claude_model,
             "gemini": settings.gemini_model,
             "ollama": settings.ollama_model,
             "groq": settings.groq_model,
+            "cerebras": settings.cerebras_model,
         },
     }
 
@@ -2980,6 +3026,18 @@ def check_connections() -> str:
                 report.append(f"   └─ 🟢 คีย์ API และการเชื่อมต่อ Groq `{settings.groq_model}`: ปกติ (Ready)")
             except Exception as e:
                 report.append(f"   └─ 🔴 เชื่อมต่อ API Groq ล้มเหลว: {e}")
+
+    elif provider == "cerebras":
+        if not settings.cerebras_api_key:
+            report.append("   └─ 🔴 ยังไม่ได้ตั้งค่า CEREBRAS_API_KEY ในไฟล์ .env")
+        else:
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=settings.cerebras_api_key, base_url=settings.cerebras_base_url)
+                client.models.list()
+                report.append(f"   └─ 🟢 คีย์ API และการเชื่อมต่อ Cerebras `{settings.cerebras_model}`: ปกติ (Ready)")
+            except Exception as e:
+                report.append(f"   └─ 🔴 เชื่อมต่อ API Cerebras ล้มเหลว: {e}")
                 
     # 4. System Info
     import psutil
@@ -3012,7 +3070,8 @@ def get_auto_routed_provider(user_msg: str) -> str:
     # Check key configurations
     groq_ok = bool(settings.groq_api_key)
     gemini_ok = bool(settings.gemini_api_key)
-    
+    cerebras_ok = bool(settings.cerebras_api_key)
+
     # Check if Ollama is listening locally (200ms timeout)
     ollama_ok = False
     try:
@@ -3038,6 +3097,8 @@ def get_auto_routed_provider(user_msg: str) -> str:
         "css", "javascript", "ตาราง", "บั๊ก", "error", "คำนวณ", "เลข", "สูตร"
     )
     if any(k in low for k in coding_keywords):
+        if cerebras_ok:
+            return "cerebras"  # gpt-oss-120b: strongest free option for code/math
         if groq_ok:
             return "groq"
         if gemini_ok:
@@ -3049,12 +3110,16 @@ def get_auto_routed_provider(user_msg: str) -> str:
         "รันคำสั่ง", "clean", "ลบไฟล์", "เช็คสถานะ"
     )
     if any(k in low for k in system_keywords):
+        if cerebras_ok:
+            return "cerebras"
         if groq_ok:
             return "groq"
         if ollama_ok:
             return "ollama"
-            
-    # Default routing chain
+
+    # Default routing chain (cerebras first: 1M free tokens/day vs groq 100K)
+    if cerebras_ok:
+        return "cerebras"
     if groq_ok:
         return "groq"
     if gemini_ok:
@@ -3437,4 +3502,8 @@ async def upload_document(http_request: Request, file: UploadFile = File(...), s
 
 if __name__ == "__main__":
     log.info("[JARVIS] Backend starting on port 8000 (active AI: %s)", settings.active_ai)
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # reload=False: reload mode watches the backend folder, but learned.md /
+    # audit DB / logs change on every request, so the server restarts itself
+    # in an endless loop (BACKEND OFFLINE) and leaves orphan child processes
+    # holding port 8000. Restart manually (restart_backend.bat) after editing code.
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)

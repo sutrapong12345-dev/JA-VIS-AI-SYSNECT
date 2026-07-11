@@ -17,7 +17,9 @@ $BackendOut   = Join-Path $LogDir 'watchdog_backend.out.log'
 $BackendErr   = Join-Path $LogDir 'watchdog_backend.err.log'
 $TunnelOut    = Join-Path $LogDir 'watchdog_tunnel.out.log'
 $TunnelErr    = Join-Path $LogDir 'watchdog_tunnel.err.log'
-$PythonExe    = 'C:\Python314\python.exe'
+# Always the project venv — the system Python may miss packages installed
+# only in the venv, and mixing the two led to orphan/ghost backend processes.
+$PythonExe    = Join-Path $RootDir 'venv\Scripts\python.exe'
 $CloudflaredExe = 'C:\Program Files (x86)\cloudflared\cloudflared.exe'
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null

@@ -1566,7 +1566,7 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = window.JARVIS_API_BASE || 'https://stuart-blocks-everybody-woods.trycloudflare.com';
+const API_BASE = window.JARVIS_API_BASE || 'https://bit-attractions-architects-rhythm.trycloudflare.com';
 
 // Session identity is issued by the backend. A client-generated ID is never an
 // authentication credential and cannot be used to open another user's session.
@@ -1865,13 +1865,13 @@ async function fetchSensors() {
 }
 
 // ===== TOKEN STATUS (real per-provider usage counters from /api/token-status) =====
-const TOKEN_STATUS_LABELS = { claude: 'CLAUDE', gemini: 'GEMINI', groq: 'GROQ', ollama: 'OLLAMA' };
+const TOKEN_STATUS_LABELS = { claude: 'CLAUDE', gemini: 'GEMINI', cerebras: 'CEREBRAS', groq: 'GROQ', ollama: 'OLLAMA' };
 async function fetchTokenStatus() {
   try {
     const res = await apiFetch('/api/token-status');
     const data = await res.json();
     const providers = data.providers || {};
-    const order = ['gemini', 'groq', 'claude', 'ollama'];
+    const order = ['gemini', 'cerebras', 'groq', 'claude', 'ollama'];
     const html = order.filter(name => providers[name]).map(name => {
       const p = providers[name];
       const label = TOKEN_STATUS_LABELS[name] || name.toUpperCase();
