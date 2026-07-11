@@ -88,8 +88,17 @@ function Get-TunnelUrlFromLog {
         if (Test-Path $f) { $text += (Get-Content $f -Raw -ErrorAction SilentlyContinue) }
     }
     if (-not $text) { return $null }
-    $m = [regex]::Match($text, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
-    if ($m.Success) { return $m.Value }
+    # cloudflared's own log lines mention https://api.trycloudflare.com (the
+    # registration endpoint) while REQUESTING a tunnel — that is never a real
+    # tunnel hostname, but the old first-match regex kept committing it to
+    # GitHub Pages whenever tunnel creation was slow, killing the frontend.
+    # Real quick-tunnel URLs are word-word-word-word subdomains; take the
+    # LAST non-api match so we never return a stale URL from an old start.
+    $all = [regex]::Matches($text, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') |
+        ForEach-Object { $_.Value } |
+        Where-Object { $_ -ne 'https://api.trycloudflare.com' }
+    $all = @($all)
+    if ($all.Count -gt 0) { return $all[-1] }
     return $null
 }
 
