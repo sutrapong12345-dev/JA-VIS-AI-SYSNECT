@@ -101,7 +101,7 @@ function Start-Tunnel {
         if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
     }
     $p = Start-Process -FilePath $CloudflaredExe `
-        -ArgumentList 'tunnel','--url','http://localhost:8000' `
+        -ArgumentList 'tunnel','--url','http://127.0.0.1:8000' `
         -WindowStyle Hidden `
         -RedirectStandardOutput $TunnelOut `
         -RedirectStandardError $TunnelErr `
