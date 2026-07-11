@@ -1525,7 +1525,48 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = 'https://markets-checking-pmc-growing.trycloudflare.com';
+const API_BASE = 'https://safari-early-spencer-sparc.trycloudflare.com';
+
+// Session identity is issued by the backend. A client-generated ID is never an
+// authentication credential and cannot be used to open another user's session.
+let sessionId = sessionStorage.getItem('jarvis_session_id') || '';
+let sessionToken = sessionStorage.getItem('jarvis_session_token') || '';
+let sessionBootstrapPromise = null;
+
+async function ensureSecureSession(forceNew = false) {
+  if (!forceNew && sessionId && sessionToken) return;
+  if (sessionBootstrapPromise) return sessionBootstrapPromise;
+  sessionBootstrapPromise = (async () => {
+    const response = await fetch(API_BASE + '/api/session', { method: 'POST' });
+    if (!response.ok) throw new Error('ไม่สามารถเริ่ม secure session ได้');
+    const data = await response.json();
+    sessionId = data.session_id;
+    sessionToken = data.token;
+    sessionStorage.setItem('jarvis_session_id', sessionId);
+    sessionStorage.setItem('jarvis_session_token', sessionToken);
+  })();
+  try {
+    await sessionBootstrapPromise;
+  } finally {
+    sessionBootstrapPromise = null;
+  }
+}
+
+async function apiFetch(path, options = {}, allowRetry = true) {
+  await ensureSecureSession();
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', 'Bearer ' + sessionToken);
+  const response = await fetch(API_BASE + path, { ...options, headers });
+  if (response.status === 401 && allowRetry) {
+    sessionStorage.removeItem('jarvis_session_id');
+    sessionStorage.removeItem('jarvis_session_token');
+    sessionId = '';
+    sessionToken = '';
+    await ensureSecureSession(true);
+    return apiFetch(path, options, false);
+  }
+  return response;
+}
 
 // ===== BOOT SEQUENCE =====
 const bootMessages = [
@@ -1673,7 +1714,7 @@ function initRealTimeEnvironment() {
 // ===== SYSTEM MONITORING (FETCH FROM BACKEND) =====
 async function fetchSystemStatus() {
   try {
-    const res = await fetch(API_BASE + '/api/system-status');
+    const res = await apiFetch('/api/system-status');
     const data = await res.json();
     
     document.getElementById('cpu-val').textContent = data.cpu + '%';
@@ -1705,12 +1746,12 @@ async function fetchSystemStatus() {
 // ===== AI ENGINE STATUS (from backend /api/health) =====
 async function fetchHealth() {
   try {
-    const res = await fetch(API_BASE + '/api/health');
+    const res = await apiFetch('/api/health');
     const h = await res.json();
     document.getElementById('ai-provider').textContent = String(h.active_ai || '--').toUpperCase();
     const model = (h.models && h.models[h.active_ai]) || '--';
     document.getElementById('ai-model').textContent = model;
-    const kbCount = (h.knowledge && h.knowledge.files) ? h.knowledge.files.length : 0;
+    const kbCount = Number((h.knowledge && h.knowledge.files) || 0);
     document.getElementById('ai-kb').textContent = kbCount + ' ไฟล์';
   } catch (err) {
     document.getElementById('ai-provider').textContent = 'OFFLINE';
@@ -1723,7 +1764,7 @@ const modelSelect = document.getElementById('ai-model-select');
 const modelSwitchMsg = document.getElementById('ai-model-switch-msg');
 async function loadModelOptions() {
   try {
-    const res = await fetch(API_BASE + '/api/models');
+    const res = await apiFetch('/api/models');
     const data = await res.json();
     const current = modelSelect.value;
     modelSelect.innerHTML = (data.models || []).map(m => {
@@ -1741,7 +1782,7 @@ modelSelect.addEventListener('change', async () => {
   modelSwitchMsg.textContent = 'กำลังเปลี่ยน...';
   modelSwitchMsg.style.color = 'var(--jvdim, #7a8a99)';
   try {
-    const res = await fetch(API_BASE + '/api/models/switch', {
+    const res = await apiFetch('/api/models/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, model: chosen }),
@@ -1766,7 +1807,7 @@ modelSelect.addEventListener('change', async () => {
 // ===== SENSORS (real machine telemetry from backend /api/system-sensors) =====
 async function fetchSensors() {
   try {
-    const res = await fetch(API_BASE + '/api/system-sensors');
+    const res = await apiFetch('/api/system-sensors');
     const s = await res.json();
     document.getElementById('sensor-cputemp').textContent = s.cpu_temp != null ? s.cpu_temp + '°C' : 'N/A';
     document.getElementById('sensor-gputemp').textContent = s.gpu_temp != null ? s.gpu_temp + '°C' : 'N/A';
@@ -1783,7 +1824,7 @@ async function fetchSensors() {
 const TOKEN_STATUS_LABELS = { claude: 'CLAUDE', gemini: 'GEMINI', groq: 'GROQ', ollama: 'OLLAMA' };
 async function fetchTokenStatus() {
   try {
-    const res = await fetch(API_BASE + '/api/token-status');
+    const res = await apiFetch('/api/token-status');
     const data = await res.json();
     const providers = data.providers || {};
     const order = ['gemini', 'groq', 'claude', 'ollama'];
@@ -1813,7 +1854,7 @@ async function fetchTokenStatus() {
 // ===== SYSTEM LOG (real backend log lines from /api/system-log) =====
 async function fetchSystemLog() {
   try {
-    const res = await fetch(API_BASE + '/api/system-log');
+    const res = await apiFetch('/api/system-log');
     const data = await res.json();
     const feed = document.getElementById('log-feed');
     const entries = data.entries || [];
@@ -1884,7 +1925,7 @@ function applySecurityState(state, sec) {
 
 async function fetchSecurityStatus() {
   try {
-    const res = await fetch(API_BASE + '/api/security/status');
+    const res = await apiFetch('/api/security/status');
     if (!res.ok) throw new Error('status ' + res.status);
     const sec = await res.json();
     applySecurityState(sec.state || 'SECURE', sec);
@@ -1907,7 +1948,7 @@ async function submitLockdownOverride() {
   msgEl.style.color = 'var(--text-dim)';
   msgEl.textContent = 'กำลังตรวจสอบ...';
   try {
-    const res = await fetch(API_BASE + '/api/security/clear', {
+    const res = await apiFetch('/api/security/clear', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, override_code: code })
     });
@@ -1941,12 +1982,8 @@ setInterval(fetchSecurityStatus, 3000);  // security posture polled every 3s
 fetchTokenStatus();
 setInterval(fetchTokenStatus, 10000);
 
-// ===== SESSION ID (isolates conversation memory per client) =====
-let sessionId = localStorage.getItem('jarvis_session_id');
-if (!sessionId) {
-  sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
-  localStorage.setItem('jarvis_session_id', sessionId);
-}
+// ===== SESSION ID =====
+// Initialized by ensureSecureSession(); never generated or trusted client-side.
 
 // ===== CHAT SYSTEM =====
 const chatLog = document.getElementById('chat-log');
@@ -2121,7 +2158,7 @@ function addMessage(role, text) {
 // ===== Reminders (automation) — poll for due reminders and surface them =====
 async function pollDueReminders() {
   try {
-    const res = await fetch(API_BASE + '/api/reminders/pending?session_id=' + encodeURIComponent(sessionId));
+    const res = await apiFetch('/api/reminders/pending?session_id=' + encodeURIComponent(sessionId));
     const data = await res.json();
     for (const r of (data.due || [])) {
       addMessage('assistant', `⏰ **ถึงเวลาแจ้งเตือนแล้วครับบอส!**\n${r.message}`);
@@ -2330,7 +2367,7 @@ async function processInput(input, options = {}) {
   let finalReply = null;
 
   try {
-    const resp = await fetch(API_BASE + '/api/chat/stream', {
+    const resp = await apiFetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId }),
@@ -2390,7 +2427,7 @@ async function processInput(input, options = {}) {
     // "retry via non-streaming endpoint" behavior below.
     // Fallback to the non-streaming endpoint
     try {
-      const r = await fetch(API_BASE + '/api/chat', {
+      const r = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId })
@@ -2512,7 +2549,7 @@ function adminToast(msg, isErr) {
   adminToast._t = setTimeout(() => { t.hidden = true; }, 3500);
 }
 async function apiJSON(url, opts) {
-  const r = await fetch(API_BASE + url, opts);
+  const r = await apiFetch(url, opts);
   return r.json();
 }
 let adminPanelInterval = null;
@@ -2710,7 +2747,7 @@ document.getElementById('ap-sec-clear-btn').addEventListener('click', clearSecur
 async function submitAuth() {
   authErrorEl.textContent = '';
   try {
-    const r = await fetch(API_BASE + '/api/auth/login', {
+    const r = await apiFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: authUser.value, password: authPass.value, session_id: sessionId })
@@ -2736,7 +2773,7 @@ async function submitAuth() {
 }
 async function doLogout() {
   try {
-    const r = await fetch(API_BASE + '/api/auth/logout', {
+    const r = await apiFetch('/api/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId })
@@ -2752,7 +2789,7 @@ async function doLogout() {
 // Restore the ADMIN badge after a page refresh (session may still be unlocked)
 async function fetchAuthStatus() {
   try {
-    const r = await fetch(API_BASE + '/api/auth/status?session_id=' + encodeURIComponent(sessionId));
+    const r = await apiFetch('/api/auth/status?session_id=' + encodeURIComponent(sessionId));
     const d = await r.json();
     setAdminBadge(!!d.is_admin);
   } catch (e) { /* backend offline — leave badge as-is */ }
@@ -2832,7 +2869,7 @@ async function uploadFile(file, isImage = false) {
   formData.append('file', file);
   
   try {
-    const res = await fetch(API_BASE + '/api/upload?session_id=' + encodeURIComponent(sessionId), {
+    const res = await apiFetch('/api/upload?session_id=' + encodeURIComponent(sessionId), {
       method: 'POST',
       body: formData
     });
@@ -2886,7 +2923,7 @@ visionBtn.addEventListener('click', async () => {
   visionBtn.classList.add('scanning');
   statusTyping.textContent = 'SCANNING VISUAL CORTEX...';
   try {
-    const res = await fetch(API_BASE + '/api/os/screenshot?session_id=' + encodeURIComponent(sessionId));
+    const res = await apiFetch('/api/os/screenshot?session_id=' + encodeURIComponent(sessionId));
     const data = await res.json();
     if (data.status === 'success') {
       // Reuses the existing /api/upload image pipeline (Gemini vision OCR/analysis)
@@ -2908,7 +2945,7 @@ clipboardBtn.addEventListener('click', async () => {
   if (isProcessing) return;
   statusTyping.textContent = 'READING CLIPBOARD...';
   try {
-    const res = await fetch(API_BASE + '/api/os/clipboard?session_id=' + encodeURIComponent(sessionId));
+    const res = await apiFetch('/api/os/clipboard?session_id=' + encodeURIComponent(sessionId));
     const data = await res.json();
     if (data.status === 'success' && data.text) {
       userInput.value = `[บริบทจากคลิปบอร์ด]: ${data.text}\n\n`;
@@ -2929,7 +2966,7 @@ clipboardBtn.addEventListener('click', async () => {
 
 async function loadChatHistory() {
   try {
-    const res = await fetch(API_BASE + '/api/chat/history?session_id=' + encodeURIComponent(sessionId));
+    const res = await apiFetch('/api/chat/history?session_id=' + encodeURIComponent(sessionId));
     const data = await res.json();
     if (data.history && data.history.length > 0) {
       enterChatMode();
@@ -2945,6 +2982,7 @@ async function loadChatHistory() {
 
 // ===== SPEECH TO TEXT (Web Speech API) =====
 async function initJarvis() {
+  await ensureSecureSession();
   initRealTimeEnvironment();
   fetchSystemStatus();
   fetchHealth();
