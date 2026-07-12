@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -75,6 +76,22 @@ class SecurityFoundationTests(unittest.TestCase):
             self.assertIn('"stage": "thinking"', response.text)
             self.assertIn('"done": true', response.text)
             self.assertLess(response.text.index('"stage": "thinking"'), response.text.index('"delta"'))
+        finally:
+            main.generate_reply_stream = original_stream
+
+    def test_stream_date_question_uses_backend_clock(self):
+        session_id, token = self.issue_session()
+        original_stream = main.generate_reply_stream
+        try:
+            main.generate_reply_stream = lambda *_args, **_kwargs: self.fail("date question reached streaming LLM")
+            response = self.client.post(
+                "/api/chat/stream",
+                headers=self.auth(token),
+                json={"session_id": session_id, "message": "ตอนนี้วันที่เท่าไหร่"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('"source": "backend_clock"', response.text)
+            self.assertIn("Asia/Bangkok", response.text)
         finally:
             main.generate_reply_stream = original_stream
 
@@ -161,6 +178,35 @@ class SecurityFoundationTests(unittest.TestCase):
         )
         self.assertIn('{"title": "..."', prompt)
         self.assertIn("[KB:company.md#chunk-1]", prompt)
+
+    def test_thai_datetime_formatter_uses_bangkok_clock_and_buddhist_year(self):
+        fixed = datetime(2026, 7, 12, 20, 30, 45, tzinfo=timezone(timedelta(hours=7)))
+        reply = main.format_current_datetime(fixed)
+        self.assertIn("วันอาทิตย์ที่ 12 กรกฎาคม พ.ศ. 2569", reply)
+        self.assertIn("ค.ศ. 2026", reply)
+        self.assertIn("20:30:45", reply)
+        self.assertIn("Asia/Bangkok", reply)
+
+    def test_direct_date_question_bypasses_llm_provider(self):
+        session_id, token = self.issue_session()
+        original_generate = main.generate_reply
+        try:
+            main.generate_reply = lambda *_args, **_kwargs: self.fail("date question reached LLM")
+            response = self.client.post(
+                "/api/chat",
+                headers=self.auth(token),
+                json={"session_id": session_id, "message": "วันนี้วันอะไร"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["source"], "backend_clock")
+            self.assertIn("อ่านจากนาฬิกา Backend โดยตรง", response.json()["reply"])
+        finally:
+            main.generate_reply = original_generate
+
+    def test_broad_today_question_is_not_mistaken_for_clock_question(self):
+        self.assertFalse(main.is_current_datetime_question("วันนี้มีข่าวเทคโนโลยีอะไรบ้าง"))
+        self.assertFalse(main.is_current_datetime_question("วันนี้ช่วยสรุปงานให้หน่อย"))
+        self.assertTrue(main.is_current_datetime_question("ตอนนี้วันที่เท่าไหร่"))
 
     def test_admin_prompt_never_grants_unrestricted_god_mode(self):
         prompt = main.build_system_prompt("clear", "", True, "", "admin", "")
