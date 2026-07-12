@@ -2434,7 +2434,7 @@ def fallback_reply(user_msg: str) -> str:
 # hand an attacker a full map of every endpoint + schema. Not needed in prod.
 app = FastAPI(
     title="J.A.R.V.I.S. AI Agent Backend",
-    version="10.3.0",
+    version="10.4.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,

@@ -570,7 +570,9 @@
   .hologram-activity[data-state="executing"] { --holo-color:#ff7a3d; --holo-rgb:255,122,61; }
   .hologram-activity[data-state="success"] { --holo-color:#00ff88; --holo-rgb:0,255,136; }
   .hologram-activity[data-state="error"] { --holo-color:#ff3b3b; --holo-rgb:255,59,59; }
-  #hologram-canvas { position:absolute; inset:0; width:100%; height:100%; opacity:.94; }
+  #hologram-canvas { position:absolute; inset:0; width:100%; height:100%; opacity:.94; touch-action:none; }
+  .hologram-activity.focus-mode #hologram-canvas { pointer-events:auto; cursor:grab; }
+  .hologram-activity.focus-mode #hologram-canvas:active { cursor:grabbing; }
   .holo-scanline { position:absolute; left:0; right:0; height:1px; top:0; background:linear-gradient(90deg,transparent,var(--holo-color),transparent); box-shadow:0 0 12px var(--holo-color); animation:holoScan 2.8s linear infinite; opacity:.65; }
   .holo-noise { position:absolute; inset:0; opacity:.12; background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(var(--holo-rgb),.14) 4px); animation:holoFlicker 1.8s steps(2) infinite; }
   .holo-corners::before, .holo-corners::after { content:''; position:absolute; width:45px; height:45px; border:2px solid var(--holo-color); }
@@ -605,6 +607,17 @@
   .holo-telemetry-row span:last-child { color:var(--holo-color); text-align:right; }
   .holo-progress-meta { display:flex; justify-content:space-between; margin-top:6px; color:var(--text-dim); font:8px 'Share Tech Mono',monospace; letter-spacing:.7px; }
   .holo-progress-meta span:last-child { color:var(--holo-color); }
+  .holo-insight-panel { position:absolute; left:18px; top:86px; width:148px; padding:9px; border:1px solid rgba(var(--holo-rgb),.24); border-left:2px solid var(--holo-color); background:linear-gradient(135deg,rgba(2,13,28,.78),rgba(2,13,28,.34)); font:8px 'Share Tech Mono',monospace; }
+  .holo-panel-title { color:var(--holo-color); letter-spacing:1.2px; margin-bottom:7px; }
+  .holo-insight-row { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-top:1px solid rgba(var(--holo-rgb),.1); }
+  .holo-insight-row span:first-child { color:var(--text-dim); }
+  .holo-insight-row span:last-child { color:#d9f8ff; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:82px; }
+  .holo-event-stream { position:absolute; right:18px; bottom:112px; width:190px; padding:8px 9px; border-right:2px solid var(--holo-color); background:linear-gradient(270deg,rgba(2,13,28,.88),rgba(2,13,28,.34)); font:8px 'Share Tech Mono',monospace; }
+  .holo-event { display:flex; gap:7px; padding:3px 0; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .holo-event::before { content:'›'; color:var(--holo-color); }
+  .holo-gesture-hint { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); display:none; align-items:center; gap:8px; padding:5px 9px; color:var(--holo-color); border:1px solid rgba(var(--holo-rgb),.2); background:rgba(2,13,28,.66); font:8px 'Share Tech Mono',monospace; letter-spacing:.6px; }
+  .hologram-activity.focus-mode .holo-gesture-hint { display:flex; }
+  .holo-projection-label { position:absolute; left:50%; top:76%; transform:translateX(-50%); color:rgba(var(--holo-rgb),.58); font:8px 'Share Tech Mono',monospace; letter-spacing:2px; text-shadow:0 0 10px var(--holo-color); }
   @keyframes holoMaterialize { from{opacity:0;transform:scale(.96);filter:blur(7px)} to{opacity:1;transform:scale(1);filter:blur(0)} }
   @keyframes holoScan { from{transform:translateY(0)} to{transform:translateY(430px)} }
   @keyframes holoFlicker { 0%,100%{opacity:.08} 50%{opacity:.16} }
@@ -1322,6 +1335,8 @@
     .hologram-activity { inset:48px 4px 58px; }
     .hologram-activity.focus-mode { inset:58px 6px 42px; }
     .holo-telemetry { display:none; }
+    .holo-insight-panel, .holo-event-stream, .holo-projection-label { display:none; }
+    .holo-gesture-hint { bottom:104px; width:max-content; max-width:90%; font-size:7px; }
     .holo-header { left:10px; right:10px; top:10px; }
     .holo-kicker { font-size:7px; letter-spacing:1px; }
     .holo-live { display:none; }
@@ -1484,7 +1499,7 @@
     </div>
 
     <div id="hologram-activity" class="hologram-activity" data-state="thinking" role="status" aria-live="polite" hidden>
-      <canvas id="hologram-canvas" aria-hidden="true"></canvas>
+      <canvas id="hologram-canvas" tabindex="0" role="img" aria-label="วัตถุ Hologram แบบโต้ตอบ ใช้ปุ่มลูกศรเพื่อหมุน และปุ่มบวกหรือลบเพื่อซูม"></canvas>
       <div class="holo-noise" aria-hidden="true"></div>
       <div class="holo-scanline" aria-hidden="true"></div>
       <div class="holo-corners" aria-hidden="true"></div>
@@ -1492,6 +1507,9 @@
         <div class="holo-kicker">J.A.R.V.I.S. · HOLOGRAPHIC PROJECTOR</div>
         <div class="holo-header-actions">
           <div class="holo-live" id="holo-live">LIVE PROCESS</div>
+          <button class="holo-focus-btn" id="holo-zoom-out-btn" type="button" aria-label="ย่อวัตถุ Hologram" title="ย่อวัตถุ"><i class="fas fa-minus"></i></button>
+          <button class="holo-focus-btn" id="holo-zoom-in-btn" type="button" aria-label="ขยายวัตถุ Hologram" title="ขยายวัตถุ"><i class="fas fa-plus"></i></button>
+          <button class="holo-focus-btn" id="holo-reset-view-btn" type="button" aria-label="รีเซ็ตมุมมอง Hologram" title="รีเซ็ตมุมมอง"><i class="fas fa-crosshairs"></i></button>
           <button class="holo-focus-btn" id="holo-focus-btn" type="button" aria-label="ขยาย Hologram เต็มหน้าจอ" aria-pressed="false" title="ขยาย Hologram"><i class="fas fa-expand"></i></button>
         </div>
       </div>
@@ -1509,6 +1527,19 @@
         <div class="holo-telemetry-row"><span>ELAPSED</span><span id="holo-elapsed">0.0s</span></div>
         <div class="holo-telemetry-row"><span>SECURITY</span><span id="holo-security">VERIFIED</span></div>
       </div>
+      <div class="holo-insight-panel" aria-hidden="true">
+        <div class="holo-panel-title">PROJECTED INTELLIGENCE</div>
+        <div class="holo-insight-row"><span>OBJECT</span><span id="holo-object">AI CORE</span></div>
+        <div class="holo-insight-row"><span>CONTEXT</span><span id="holo-context">SESSION</span></div>
+        <div class="holo-insight-row"><span>ACCESS</span><span id="holo-access">STAFF</span></div>
+        <div class="holo-insight-row"><span>TRACE</span><span id="holo-trace">ACTIVE</span></div>
+      </div>
+      <div class="holo-event-stream" aria-hidden="true">
+        <div class="holo-panel-title">LIVE EVENT STREAM</div>
+        <div id="holo-event-list"><div class="holo-event">PROJECTOR READY</div></div>
+      </div>
+      <div class="holo-projection-label" id="holo-projection-label" aria-hidden="true">NEURAL SPHERE · LIVE MODEL</div>
+      <div class="holo-gesture-hint"><i class="fas fa-hand-pointer"></i><span>DRAG/TOUCH ROTATE · WHEEL OR +/- ZOOM · ARROWS ROTATE</span></div>
       <div class="holo-status-card">
         <div class="holo-title" id="holo-title">กำลังประมวลผลคำสั่ง</div>
         <div class="holo-detail" id="holo-detail">วิเคราะห์บริบทและเตรียมระบบที่เกี่ยวข้อง</div>
@@ -1590,7 +1621,7 @@
   <!-- BOTTOM HUD -->
   <footer class="hud-bottom">
     <div>GEO: <span id="geo-coords">13.7563°N 100.5018°E</span></div>
-    <div>J.A.R.V.I.S. <span>v10.3.0</span> · SYSNECT <span>AI AGENT</span></div>
+    <div>J.A.R.V.I.S. <span>v10.4.0</span> · SYSNECT <span>AI AGENT</span></div>
     <div>ENCRYPTION: <span>AES-256</span> · STATUS: <span id="conn-status">SECURE</span></div>
   </footer>
   
@@ -1719,7 +1750,7 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const REMOTE_API_BASE = 'https://puzzles-shell-recreational-lloyd.trycloudflare.com';
+const REMOTE_API_BASE = 'https://george-jade-utilities-elite.trycloudflare.com';
 const IS_LOCAL_FRONTEND = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
 const API_BASE = window.JARVIS_API_BASE || (IS_LOCAL_FRONTEND ? 'http://127.0.0.1:8000' : REMOTE_API_BASE);
 const DEFAULT_API_TIMEOUT_MS = 20000;
@@ -2572,10 +2603,26 @@ const holoStateIcon = document.getElementById('holo-state-icon');
 const holoStateLabel = document.getElementById('holo-state-label');
 const holoSteps = [...document.querySelectorAll('.holo-step')];
 const holoFocusBtn = document.getElementById('holo-focus-btn');
+const holoResetViewBtn = document.getElementById('holo-reset-view-btn');
+const holoZoomInBtn = document.getElementById('holo-zoom-in-btn');
+const holoZoomOutBtn = document.getElementById('holo-zoom-out-btn');
+const holoObject = document.getElementById('holo-object');
+const holoContext = document.getElementById('holo-context');
+const holoAccess = document.getElementById('holo-access');
+const holoTrace = document.getElementById('holo-trace');
+const holoProjectionLabel = document.getElementById('holo-projection-label');
+const holoEventList = document.getElementById('holo-event-list');
 let hologramEnabled = localStorage.getItem('jarvis_hologram_enabled') !== 'false';
 let hologramStartedAt = 0;
 let hologramHideTimer = null;
 let hologramState = 'thinking';
+let holoViewYaw = 0;
+let holoViewPitch = 0;
+let holoViewZoom = 1;
+let holoDragging = false;
+let holoPointerX = 0;
+let holoPointerY = 0;
+const hologramEvents = [];
 
 const HOLOGRAM_PALETTE = {
   thinking: [0, 217, 255], processing: [0, 217, 255], searching: [0, 217, 255],
@@ -2584,17 +2631,26 @@ const HOLOGRAM_PALETTE = {
 };
 
 const HOLOGRAM_MODES = {
-  listening: { icon:'fa-microphone-lines', label:'VOICE ACQUISITION', step:0, progress:'กำลังรับสัญญาณเสียง' },
-  thinking: { icon:'fa-brain', label:'COGNITIVE ANALYSIS', step:1, progress:'กำลังวิเคราะห์บริบท' },
-  processing: { icon:'fa-microchip', label:'NEURAL PROCESSING', step:2, progress:'AI Core กำลังประมวลผล' },
-  searching: { icon:'fa-satellite-dish', label:'NETWORK SEARCH', step:2, progress:'กำลังค้นหาแหล่งข้อมูล' },
-  web_search: { icon:'fa-globe', label:'WEB INTELLIGENCE', step:2, progress:'กำลังค้นหาและตรวจแหล่งอ้างอิง' },
-  data_search: { icon:'fa-database', label:'KNOWLEDGE RETRIEVAL', step:2, progress:'กำลังดึงความรู้ที่ได้รับอนุญาต' },
-  executing: { icon:'fa-gears', label:'SECURE TOOL EXECUTION', step:3, progress:'กำลังเรียกใช้เครื่องมืออย่างปลอดภัย' },
-  uploading: { icon:'fa-file-shield', label:'DOCUMENT SCAN', step:1, progress:'กำลังตรวจและอ่านข้อมูล' },
-  success: { icon:'fa-circle-check', label:'MISSION COMPLETE', step:4, progress:'ส่งมอบผลลัพธ์เรียบร้อย' },
-  error: { icon:'fa-triangle-exclamation', label:'ATTENTION REQUIRED', step:4, progress:'งานหยุดลง กรุณาตรวจรายละเอียด' }
+  listening: { icon:'fa-microphone-lines', label:'VOICE ACQUISITION', step:0, progress:'กำลังรับสัญญาณเสียง', object:'VOICE WAVE', context:'AUDIO STREAM' },
+  thinking: { icon:'fa-brain', label:'COGNITIVE ANALYSIS', step:1, progress:'กำลังวิเคราะห์บริบท', object:'NEURAL SPHERE', context:'SESSION MEMORY' },
+  processing: { icon:'fa-microchip', label:'NEURAL PROCESSING', step:2, progress:'AI Core กำลังประมวลผล', object:'AI CORE', context:'MODEL ROUTING' },
+  searching: { icon:'fa-satellite-dish', label:'NETWORK SEARCH', step:2, progress:'กำลังค้นหาแหล่งข้อมูล', object:'SEARCH RADAR', context:'NETWORK' },
+  web_search: { icon:'fa-globe', label:'WEB INTELLIGENCE', step:2, progress:'กำลังค้นหาและตรวจแหล่งอ้างอิง', object:'GLOBAL RADAR', context:'WEB SOURCES' },
+  data_search: { icon:'fa-database', label:'KNOWLEDGE RETRIEVAL', step:2, progress:'กำลังดึงความรู้ที่ได้รับอนุญาต', object:'DATA MATRIX', context:'KNOWLEDGE RAG' },
+  executing: { icon:'fa-gears', label:'SECURE TOOL EXECUTION', step:3, progress:'กำลังเรียกใช้เครื่องมืออย่างปลอดภัย', object:'TOOL CORE', context:'SANDBOX' },
+  uploading: { icon:'fa-file-shield', label:'DOCUMENT SCAN', step:1, progress:'กำลังตรวจและอ่านข้อมูล', object:'DOCUMENT', context:'SECURE INGEST' },
+  success: { icon:'fa-circle-check', label:'MISSION COMPLETE', step:4, progress:'ส่งมอบผลลัพธ์เรียบร้อย', object:'RESULT CORE', context:'VERIFIED OUTPUT' },
+  error: { icon:'fa-triangle-exclamation', label:'ATTENTION REQUIRED', step:4, progress:'งานหยุดลง กรุณาตรวจรายละเอียด', object:'ALERT SHIELD', context:'SAFE STOP' }
 };
+
+function recordHologramEvent(message) {
+  const stamp = new Date().toLocaleTimeString('th-TH', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  hologramEvents.unshift(`${stamp} · ${String(message).toUpperCase()}`);
+  hologramEvents.splice(3);
+  holoEventList.replaceChildren(...hologramEvents.map(text => {
+    const row = document.createElement('div'); row.className = 'holo-event'; row.textContent = text; return row;
+  }));
+}
 
 function setHologramActivity(state, title, detail, options = {}) {
   if (!hologramEnabled) return;
@@ -2608,6 +2664,11 @@ function setHologramActivity(state, title, detail, options = {}) {
   const mode = HOLOGRAM_MODES[hologramState] || HOLOGRAM_MODES.processing;
   holoStateIcon.className = `fas ${mode.icon}`;
   holoStateLabel.textContent = mode.label;
+  holoObject.textContent = mode.object;
+  holoContext.textContent = mode.context;
+  holoAccess.textContent = String(document.getElementById('conversation-role')?.textContent || 'STAFF').toUpperCase();
+  holoTrace.textContent = String(options.trace || options.stage || 'ACTIVE').toUpperCase().slice(0, 18);
+  holoProjectionLabel.textContent = `${mode.object} · LIVE MODEL`;
   holoProgressLabel.textContent = options.progressLabel || mode.progress;
   holoSteps.forEach((step, index) => {
     step.classList.toggle('complete', index < mode.step || hologramState === 'success');
@@ -2615,6 +2676,7 @@ function setHologramActivity(state, title, detail, options = {}) {
   });
   holoStage.textContent = String(options.stage || state || 'PROCESS').toUpperCase();
   holoEngine.textContent = String(options.engine || document.getElementById('ai-provider').textContent || 'JARVIS CORE').toUpperCase();
+  recordHologramEvent(options.event || options.stage || mode.label);
   const progress = Number(options.progress);
   if (Number.isFinite(progress)) {
     holoProgressBar.classList.remove('indeterminate');
@@ -2632,7 +2694,12 @@ function finishHologram(success, title, detail, delay = 1800) {
   setHologramActivity(success ? 'success' : 'error', title, detail, {
     stage: success ? 'COMPLETE' : 'ERROR', progress: 100
   });
-  hologramHideTimer = setTimeout(hideHologram, delay);
+  hologramHideTimer = setTimeout(autoHideHologram, delay);
+}
+
+function autoHideHologram() {
+  if (hologramEl.classList.contains('focus-mode')) return;
+  hideHologram();
 }
 
 function hideHologram() {
@@ -2646,10 +2713,63 @@ function hideHologram() {
 
 holoFocusBtn.addEventListener('click', () => {
   const expanded = hologramEl.classList.toggle('focus-mode');
+  clearTimeout(hologramHideTimer);
   holoFocusBtn.setAttribute('aria-pressed', String(expanded));
   holoFocusBtn.setAttribute('aria-label', expanded ? 'ย่อ Hologram' : 'ขยาย Hologram เต็มหน้าจอ');
   holoFocusBtn.title = expanded ? 'ย่อ Hologram' : 'ขยาย Hologram';
   holoFocusBtn.innerHTML = `<i class="fas ${expanded ? 'fa-compress' : 'fa-expand'}"></i>`;
+  if (!expanded && ['success','error'].includes(hologramState)) hologramHideTimer = setTimeout(hideHologram, 1200);
+});
+
+function resetHologramView() {
+  holoViewYaw = 0; holoViewPitch = 0; holoViewZoom = 1;
+  syncHologramViewState();
+  recordHologramEvent('VIEW RECENTERED');
+}
+
+function syncHologramViewState() {
+  hologramCanvas.dataset.zoom = holoViewZoom.toFixed(2);
+  hologramCanvas.dataset.yaw = holoViewYaw.toFixed(2);
+  hologramCanvas.dataset.pitch = holoViewPitch.toFixed(2);
+}
+
+holoResetViewBtn.addEventListener('click', resetHologramView);
+holoZoomInBtn.addEventListener('click', () => { holoViewZoom = Math.min(1.45, holoViewZoom + .1); syncHologramViewState(); });
+holoZoomOutBtn.addEventListener('click', () => { holoViewZoom = Math.max(.72, holoViewZoom - .1); syncHologramViewState(); });
+syncHologramViewState();
+
+hologramCanvas.addEventListener('pointerdown', event => {
+  if (!hologramEl.classList.contains('focus-mode')) return;
+  holoDragging = true; holoPointerX = event.clientX; holoPointerY = event.clientY;
+  hologramCanvas.setPointerCapture?.(event.pointerId);
+});
+hologramCanvas.addEventListener('pointermove', event => {
+  if (!holoDragging) return;
+  holoViewYaw += (event.clientX - holoPointerX) * .008;
+  holoViewPitch = Math.max(-.8, Math.min(.8, holoViewPitch + (event.clientY - holoPointerY) * .006));
+  holoPointerX = event.clientX; holoPointerY = event.clientY;
+  syncHologramViewState();
+});
+hologramCanvas.addEventListener('pointerup', () => { holoDragging = false; });
+hologramCanvas.addEventListener('pointercancel', () => { holoDragging = false; });
+hologramCanvas.addEventListener('wheel', event => {
+  if (!hologramEl.classList.contains('focus-mode')) return;
+  event.preventDefault();
+  holoViewZoom = Math.max(.72, Math.min(1.45, holoViewZoom - event.deltaY * .001));
+  syncHologramViewState();
+}, { passive:false });
+hologramCanvas.addEventListener('keydown', event => {
+  const controls = ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','=','-','0'];
+  if (!controls.includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === 'ArrowLeft') holoViewYaw -= .12;
+  if (event.key === 'ArrowRight') holoViewYaw += .12;
+  if (event.key === 'ArrowUp') holoViewPitch = Math.max(-.8, holoViewPitch - .1);
+  if (event.key === 'ArrowDown') holoViewPitch = Math.min(.8, holoViewPitch + .1);
+  if (event.key === '+' || event.key === '=') holoViewZoom = Math.min(1.45, holoViewZoom + .08);
+  if (event.key === '-') holoViewZoom = Math.max(.72, holoViewZoom - .08);
+  if (event.key === '0') resetHologramView();
+  else syncHologramViewState();
 });
 
 document.addEventListener('keydown', (event) => {
@@ -2663,7 +2783,7 @@ document.getElementById('hologram-btn').addEventListener('click', (event) => {
   event.currentTarget.setAttribute('aria-pressed', String(hologramEnabled));
   if (hologramEnabled) {
     setHologramActivity('success', 'HOLOGRAM ONLINE', 'ระบบแสดงสถานะงานแบบ Holographic พร้อมใช้งาน', { stage: 'READY', progress: 100 });
-    hologramHideTimer = setTimeout(hideHologram, 1400);
+    hologramHideTimer = setTimeout(autoHideHologram, 3500);
   } else {
     hideHologram();
   }
@@ -2691,7 +2811,7 @@ document.getElementById('hologram-btn').setAttribute('aria-pressed', String(holo
     const color = (alpha) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
     const t = reducedMotion ? 0 : now / 1000;
     const cx = w * .5, cy = h * .47;
-    const radius = Math.min(w, h) * (w < 520 ? .22 : .27);
+    const radius = Math.min(w, h) * (w < 520 ? .22 : .27) * holoViewZoom;
 
     // Perspective floor grid.
     ctx.lineWidth = .6;
@@ -2708,6 +2828,25 @@ document.getElementById('hologram-btn').setAttribute('aria-pressed', String(holo
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
     }
 
+    // Pepper's-Ghost inspired projector: emitter, volumetric light cone and base.
+    const projectorTop = Math.max(88, cy - radius * 1.24);
+    const projectorBottom = Math.min(h - 62, cy + radius * 1.28);
+    const beam = ctx.createLinearGradient(0, projectorTop, 0, projectorBottom);
+    beam.addColorStop(0, color(.02)); beam.addColorStop(.48, color(.105)); beam.addColorStop(1, color(.025));
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(cx - radius * .28, projectorTop); ctx.lineTo(cx - radius * .92, projectorBottom);
+    ctx.lineTo(cx + radius * .92, projectorBottom); ctx.lineTo(cx + radius * .28, projectorTop); ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.translate(cx, projectorTop); ctx.scale(1,.22);
+    ctx.strokeStyle=color(.42); ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(0,0,radius*.54,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([4,7]); ctx.strokeStyle=color(.2); ctx.beginPath(); ctx.arc(0,0,radius*.72,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    ctx.save(); ctx.translate(cx, projectorBottom); ctx.scale(1,.22);
+    for(let platform=0;platform<4;platform++){
+      ctx.rotate((platform%2?-1:1)*t*.08); ctx.setLineDash(platform%2?[10,6]:[]);
+      ctx.strokeStyle=color(.5-platform*.08); ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(0,0,radius*(.72+platform*.16),0,Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+
     // Three orbital rings around the projected core.
     ctx.save(); ctx.translate(cx, cy);
     for (let ring = 0; ring < 3; ring++) {
@@ -2723,7 +2862,7 @@ document.getElementById('hologram-btn').setAttribute('aria-pressed', String(holo
     ctx.restore();
 
     // Rotating wireframe globe built from true 3D latitude/longitude points.
-    const rotY = t * .52, rotX = -.32 + Math.sin(t * .35) * .08;
+    const rotY = t * .52 + holoViewYaw, rotX = -.32 + Math.sin(t * .35) * .08 + holoViewPitch;
     const points = [];
     for (let latIndex = 1; latIndex < 12; latIndex++) {
       const lat = -Math.PI / 2 + (latIndex / 12) * Math.PI;

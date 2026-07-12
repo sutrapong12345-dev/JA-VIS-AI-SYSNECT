@@ -198,6 +198,8 @@ venv\Scripts\python.exe -m unittest discover -s tests -v
 - Hologram แสดง stage จาก SSE โดยไม่บล็อกช่องพิมพ์หรือปุ่ม Stop
 - Pipeline ของ Hologram เปลี่ยนตาม stage และ Focus Mode เข้า/ออกได้ด้วยปุ่มหรือ `Esc`
 - Radar, Voice Wave, Document Scan, Tool Core, Success และ Error render ได้โดยไม่เกิด JavaScript error
+- Focus Mode รองรับ drag/touch rotation, wheel/button/keyboard zoom และ reset view โดยไม่เปลี่ยนสิทธิ์หรือ payload ที่ส่ง Backend
+- Live Event Stream ต้องแสดงเฉพาะ stage และ metadata ที่ปลอดภัย ห้ามใส่ token, password หรือ API key
 
 ### Provider Circuit Breaker
 
