@@ -42,8 +42,9 @@ import psutil
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 try:
@@ -211,6 +212,8 @@ class Settings:
     max_history: int = int(os.getenv("MAX_HISTORY", "20"))
     doc_context_limit: int = int(os.getenv("DOC_CONTEXT_LIMIT", "15000"))
     session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", "3600"))
+    provider_cooldown_seconds: int = int(os.getenv("PROVIDER_COOLDOWN_SECONDS", "60"))
+    provider_quota_cooldown_seconds: int = int(os.getenv("PROVIDER_QUOTA_COOLDOWN_SECONDS", "300"))
 
     # Security
     # Safe defaults keep all PC control disabled. An administrator may explicitly
@@ -2056,6 +2059,59 @@ def switch_active_model(raw_name: str) -> str:
 # Cerebras sits ahead of Groq: 1M free tokens/day vs Groq's 100K.
 _FALLBACK_CHAIN = ["gemini", "cerebras", "groq", "ollama"]
 
+# Small in-memory circuit breaker. Without it, every chat turn retries a cloud
+# provider that has already returned 429/503, adding several seconds before the
+# same fallback is selected. State resets on backend restart by design.
+_PROVIDER_RUNTIME_LOCK = threading.Lock()
+_PROVIDER_RUNTIME: Dict[str, Dict[str, Any]] = {
+    name: {"failures": 0, "cooldown_until": 0.0, "last_error": "", "last_success": 0.0}
+    for name in _FALLBACK_CHAIN + ["claude"]
+}
+
+
+def _provider_runtime_entry(provider: str) -> Dict[str, Any]:
+    return _PROVIDER_RUNTIME.setdefault(
+        provider, {"failures": 0, "cooldown_until": 0.0, "last_error": "", "last_success": 0.0}
+    )
+
+
+def _provider_is_available(provider: str, now: Optional[float] = None) -> bool:
+    with _PROVIDER_RUNTIME_LOCK:
+        entry = _provider_runtime_entry(provider)
+        return float(entry["cooldown_until"]) <= (time.time() if now is None else now)
+
+
+def _mark_provider_success(provider: str) -> None:
+    with _PROVIDER_RUNTIME_LOCK:
+        entry = _provider_runtime_entry(provider)
+        entry.update({"failures": 0, "cooldown_until": 0.0, "last_error": "", "last_success": time.time()})
+
+
+def _mark_provider_failure(provider: str, exc: Exception, quota: bool = False) -> None:
+    cooldown = settings.provider_quota_cooldown_seconds if quota else settings.provider_cooldown_seconds
+    with _PROVIDER_RUNTIME_LOCK:
+        entry = _provider_runtime_entry(provider)
+        entry["failures"] = int(entry["failures"]) + 1
+        entry["cooldown_until"] = time.time() + max(1, cooldown)
+        # Keep the status useful for an admin without retaining a large or
+        # potentially sensitive upstream response body.
+        entry["last_error"] = str(exc).replace("\n", " ")[:160]
+
+
+def get_provider_runtime_status() -> Dict[str, Dict[str, Any]]:
+    now = time.time()
+    with _PROVIDER_RUNTIME_LOCK:
+        return {
+            name: {
+                "available": float(entry["cooldown_until"]) <= now,
+                "failures": int(entry["failures"]),
+                "cooldown_seconds": max(0, int(float(entry["cooldown_until"]) - now)),
+                "last_error": entry["last_error"],
+                "last_success": int(entry["last_success"]) if entry["last_success"] else None,
+            }
+            for name, entry in _PROVIDER_RUNTIME.items()
+        }
+
 
 # Gemini's free-tier requests/day cap varies WILDLY by model — verified live
 # 2026-07-08: gemini-2.5-flash is only 20/day (exhausts almost immediately),
@@ -2148,12 +2204,21 @@ def _is_quota_error(exc: Exception) -> bool:
     )
 
 
+def _is_retryable_provider_error(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return _is_quota_error(exc) or any(marker in s for marker in (
+        "timeout", "timed out", "connection", "temporarily unavailable",
+        "service unavailable", "server error", "internal server error",
+        "502", "503", "504",
+    ))
+
+
 def _fallback_order(primary: str) -> List[str]:
     order = [primary] + [p for p in _FALLBACK_CHAIN if p != primary]
     seen = set()
     result = []
     for p in order:
-        if p not in seen and _provider_configured(p) and p in _PROVIDERS:
+        if p not in seen and _provider_configured(p) and p in _PROVIDERS and _provider_is_available(p):
             seen.add(p)
             result.append(p)
     return result
@@ -2167,8 +2232,9 @@ def generate_reply(provider: str, system: str, history: List[Dict[str, str]]) ->
     for p in _fallback_order(provider):
         try:
             reply = _PROVIDERS[p](system, history)
+            _mark_provider_success(p)
             if p != provider:
-                reply = f"_(⚠️ {provider.upper()} เกินโควต้าชั่วคราว ระบบสลับไปใช้ {p.upper()} แทนให้อัตโนมัติ)_\n\n" + reply
+                reply = f"_(⚠️ {provider.upper()} ไม่พร้อมใช้งานชั่วคราว ระบบสลับไปใช้ {p.upper()} อัตโนมัติ)_\n\n" + reply
             return reply
         except ProviderNotConfigured:
             continue
@@ -2176,10 +2242,15 @@ def generate_reply(provider: str, system: str, history: List[Dict[str, str]]) ->
             if _is_quota_error(exc):
                 log.warning("Provider %s hit quota/rate-limit, trying fallback: %s", p, exc)
                 _record_usage(p, 0)  # 0 tokens billed, but the attempt still counts against the daily request cap
+                _mark_provider_failure(p, exc, quota=True)
                 last_quota_provider = p
                 continue
+            if _is_retryable_provider_error(exc):
+                log.warning("Provider %s temporarily unavailable, trying fallback: %s", p, exc)
+                _mark_provider_failure(p, exc)
+                continue
             log.error("Generation error (%s): %s", p, exc)
-            return f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกลครับ: {exc}"
+            return "ระบบ AI ตอบกลับผิดปกติครับ กรุณาลองใหม่หรือตรวจสถานะ Provider ในแผงผู้ดูแลระบบ"
     if last_quota_provider:
         return f"⚠️ **แจ้งเตือนจากระบบ:** สมองกลที่ตั้งค่าไว้ทั้งหมดติดโควต้า/ขีดจำกัดของฟรีเทียร์ครับ (ล่าสุดคือ {last_quota_provider.upper()})\n\nโปรดรอสักครู่แล้วลองใหม่ครับ"
     return "ไม่มี AI ที่ตั้งค่าไว้พร้อมใช้งานครับ โปรดตรวจสอบ API Key ใน .env"
@@ -2311,9 +2382,10 @@ def generate_reply_stream(provider: str, system: str, history: List[Dict[str, st
         try:
             for chunk in _stream_one_provider(p, system, history):
                 if not yielded_any and p != provider:
-                    yield f"_(⚠️ {provider.upper()} เกินโควต้าชั่วคราว ระบบสลับไปใช้ {p.upper()} แทนให้อัตโนมัติ)_\n\n"
+                    yield f"_(⚠️ {provider.upper()} ไม่พร้อมใช้งานชั่วคราว ระบบสลับไปใช้ {p.upper()} อัตโนมัติ)_\n\n"
                 yielded_any = True
                 yield chunk
+            _mark_provider_success(p)
             return
         except ProviderNotConfigured as exc:
             if yielded_any:
@@ -2328,10 +2400,15 @@ def generate_reply_stream(provider: str, system: str, history: List[Dict[str, st
             if _is_quota_error(exc):
                 log.warning("Provider %s hit quota/rate-limit, trying fallback: %s", p, exc)
                 _record_usage(p, 0)  # 0 tokens billed, but the attempt still counts against the daily request cap
+                _mark_provider_failure(p, exc, quota=True)
                 last_quota_provider = p
                 continue
+            if _is_retryable_provider_error(exc):
+                log.warning("Provider %s temporarily unavailable, trying fallback: %s", p, exc)
+                _mark_provider_failure(p, exc)
+                continue
             log.error("Streaming error (%s): %s", p, exc)
-            yield f"ระบบเกิดข้อผิดพลาดในการเชื่อมต่อสมองกลครับ: {exc}"
+            yield "ระบบ AI ตอบกลับผิดปกติครับ กรุณาลองใหม่หรือตรวจสถานะ Provider ในแผงผู้ดูแลระบบ"
             return
     if last_quota_provider:
         yield f"⚠️ **แจ้งเตือนจากระบบ:** สมองกลที่ตั้งค่าไว้ทั้งหมดติดโควต้า/ขีดจำกัดของฟรีเทียร์ครับ (ล่าสุดคือ {last_quota_provider.upper()})\n\nโปรดรอสักครู่แล้วลองใหม่ครับ"
@@ -2357,7 +2434,7 @@ def fallback_reply(user_msg: str) -> str:
 # hand an attacker a full map of every endpoint + schema. Not needed in prod.
 app = FastAPI(
     title="J.A.R.V.I.S. AI Agent Backend",
-    version="10.1.0",
+    version="10.2.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -2381,11 +2458,60 @@ _PUBLIC_API_PATHS = {
     "/api/health", "/api/session", "/api/security/status", "/api/security/clear",
 }
 
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{8,80}$")
+
+
+def _request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", "req_unknown")
+
+
+def _error_payload(request: Request, message: str, code: str) -> Dict[str, str]:
+    return {
+        "status": "error", "code": code, "message": message,
+        "request_id": _request_id(request),
+    }
+
+
+def _apply_response_headers(response, request_id: str):
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    message = str(exc.detail) if exc.detail else "คำขอไม่สำเร็จครับ"
+    response = JSONResponse(
+        status_code=exc.status_code,
+        content=_error_payload(request, message, f"http_{exc.status_code}"),
+        headers=exc.headers,
+    )
+    return _apply_response_headers(response, _request_id(request))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    fields = sorted({str(error.get("loc", ["request"])[-1]) for error in exc.errors()})
+    response = JSONResponse(
+        status_code=422,
+        content={
+            **_error_payload(request, "รูปแบบข้อมูลไม่ถูกต้องครับ", "validation_error"),
+            "fields": fields[:10],
+        },
+    )
+    return _apply_response_headers(response, _request_id(request))
+
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
-    from starlette.responses import JSONResponse
     path = request.url.path
+    supplied_request_id = request.headers.get("x-request-id", "").strip()
+    request_id = supplied_request_id if _REQUEST_ID_RE.fullmatch(supplied_request_id) else f"req_{secrets.token_hex(8)}"
+    request.state.request_id = request_id
 
     # Body-size guard via Content-Length (cheap, before we read anything).
     cl = request.headers.get("content-length")
@@ -2394,7 +2520,11 @@ async def security_middleware(request: Request, call_next):
             if int(cl) > MAX_REQUEST_BYTES:
                 log.warning("Rejected oversized request (%s bytes) from ip=%s", cl, client_ip(request))
                 security_monitor.record("oversized_request", client_ip(request))
-                return JSONResponse(status_code=413, content={"status": "error", "message": "คำขอมีขนาดใหญ่เกินไปครับ"})
+                response = JSONResponse(
+                    status_code=413,
+                    content=_error_payload(request, "คำขอมีขนาดใหญ่เกินไปครับ", "request_too_large"),
+                )
+                return _apply_response_headers(response, request_id)
         except ValueError:
             pass
 
@@ -2402,14 +2532,17 @@ async def security_middleware(request: Request, call_next):
     # endpoint until the cooldown passes (or an admin clears it).
     if path.startswith("/api/") and path not in _LOCKDOWN_ALLOWED_PATHS and security_monitor.is_locked_down():
         st = security_monitor.status()
-        return JSONResponse(status_code=503, content={
+        response = JSONResponse(status_code=503, content={
             "status": "locked",
+            "code": "security_lockdown",
+            "request_id": request_id,
             "message": "🛡️ ระบบตรวจพบภัยคุกคามด้านความปลอดภัย — ปิดระบบหลังบ้านชั่วคราวเพื่อป้องกันข้อมูล กรุณารอสักครู่ครับ",
             "security": {
                 key: st[key]
                 for key in ("state", "locked_down", "indefinite", "seconds_remaining")
             },
         })
+        return _apply_response_headers(response, request_id)
 
     # Every API except the minimal liveness/bootstrap/break-glass surface needs
     # a server-issued bearer credential. The token determines the session;
@@ -2422,10 +2555,13 @@ async def security_middleware(request: Request, call_next):
     ):
         credential = session_auth.validate_credential(_bearer_token(request))
         if not credential:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=401,
-                content={"status": "error", "message": "กรุณาเริ่ม session ใหม่หรือเข้าสู่ระบบอีกครั้งครับ"},
+                content=_error_payload(
+                    request, "กรุณาเริ่ม session ใหม่หรือเข้าสู่ระบบอีกครั้งครับ", "session_required"
+                ),
             )
+            return _apply_response_headers(response, request_id)
         request.state.session_id = credential.session_id
         request.state.actor_id = credential.actor_id
         request.state.role = credential.role
@@ -2433,12 +2569,7 @@ async def security_middleware(request: Request, call_next):
     response = await call_next(request)
 
     # Defensive HTTP security headers (clickjacking, MIME-sniffing, referrer leak).
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    return response
+    return _apply_response_headers(response, request_id)
 
 
 app.add_middleware(
@@ -2446,7 +2577,8 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
 
@@ -2458,6 +2590,18 @@ class ChatRequest(BaseModel):
 
 class SessionResetRequest(BaseModel):
     session_id: str = "default"
+
+
+def _validated_chat_message(raw: str) -> str:
+    message = (raw or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="กรุณาพิมพ์ข้อความก่อนส่งครับ")
+    if len(message) > MAX_MESSAGE_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"ข้อความยาวเกิน {MAX_MESSAGE_CHARS:,} ตัวอักษรครับ กรุณาย่อหรือแนบเป็นไฟล์",
+        )
+    return message
 
 
 @app.post("/api/session")
@@ -2577,7 +2721,9 @@ def get_token_status_endpoint(http_request: Request):
     STATUS panel — real counters accumulated from each API response's usage
     field, not an estimate."""
     _admin_session(http_request)
-    return get_token_status()
+    status = get_token_status()
+    status["runtime"] = get_provider_runtime_status()
+    return status
 
 
 @app.get("/api/models")
@@ -3133,7 +3279,7 @@ def get_auto_routed_provider(user_msg: str) -> str:
 @app.post("/api/chat")
 def chat_with_jarvis(request: ChatRequest, http_request: Request):
     session_id = _bound_session(http_request, request.session_id)
-    user_msg = (request.message or "")[:MAX_MESSAGE_CHARS]
+    user_msg = _validated_chat_message(request.message)
 
     ip = client_ip(http_request)
     if any(bad in (request.session_id or "") for bad in ("..", "/", "\\", "\x00")):
@@ -3306,7 +3452,7 @@ def chat_stream(request: ChatRequest, http_request: Request):
     Emits {"delta": "..."} chunks, then a final {"done": true, "reply": "..."}.
     """
     session_id = _bound_session(http_request, request.session_id)
-    user_msg = (request.message or "")[:MAX_MESSAGE_CHARS]
+    user_msg = _validated_chat_message(request.message)
 
     def sse(payload: dict) -> str:
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -3360,18 +3506,21 @@ def chat_stream(request: ChatRequest, http_request: Request):
     )
 
     def gen():
+        # "stage" events drive the frontend hologram HUD (ignored by old clients).
+        yield sse({"stage": "thinking"})
         parts: List[str] = []
         for chunk in generate_reply_stream(provider, system, history):
             parts.append(chunk)
             yield sse({"delta": chunk})
-            
+
         reply = "".join(parts)
-        
+
         # Check for SEARCH command
         search_match = re.search(r"\[SEARCH:\s*(.*?)\]", reply, re.IGNORECASE)
         if search_match:
             query = search_match.group(1).strip()
             log.info("Web search triggered (session %s..., stream): %s", session_id[:8], query)
+            yield sse({"stage": "web_search", "detail": query})
             yield sse({"delta": f"\n\n*กำลังค้นหาข้อมูล: {query}...*\n\n"})
             search_results = perform_web_search(query)
             
@@ -3399,6 +3548,7 @@ def chat_stream(request: ChatRequest, http_request: Request):
         elif sysnect_match:
             query = sysnect_match.group(1).strip()
             log.info("SYSNECT data search triggered (session %s..., stream): %s", session_id[:8], query)
+            yield sse({"stage": "data_search", "detail": query})
             yield sse({"delta": f"\n\n*กำลังค้นข้อมูล SYSNECT: {query}...*\n\n"})
             sysnect_results = search_sysnect_data(query)
 
@@ -3416,6 +3566,8 @@ def chat_stream(request: ChatRequest, http_request: Request):
             first_clean = re.sub(r"\[SYSNECT_DATA:\s*.*?\]", "", reply, flags=re.IGNORECASE).strip()
             reply = f"{first_clean}\n\n{''.join(parts3)}".strip() if first_clean else "".join(parts3)
 
+        if TOOL_TAG_RE.search(reply):
+            yield sse({"stage": "executing"})
         cleaned = agent.process(
             reply, session_id, is_admin,
             role=getattr(http_request.state, "role", "staff"),

@@ -1,7 +1,7 @@
 # JARVIS Watchdog
 # Keeps the backend (uvicorn) and the Cloudflare quick tunnel alive.
 # When the tunnel's ephemeral URL changes (every fresh start), it rewrites
-# frontend/index.html's API_BASE and auto-commits + pushes so the public
+# frontend/index.html's REMOTE_API_BASE and auto-commits + pushes so the public
 # GitHub Pages frontend always points at the current tunnel.
 # Meant to be launched once (at Windows logon, via the registered Scheduled
 # Task) and left running forever in the background.
@@ -129,17 +129,17 @@ function Start-Tunnel {
 
 function Update-FrontendApiBase($newUrl) {
     $content = Get-Content $FrontendFile -Raw -Encoding UTF8
-    $pattern = "const API_BASE = window\.JARVIS_API_BASE \|\| '([^']*)'"
+    $pattern = "const REMOTE_API_BASE = '([^']*)'"
     $match = [regex]::Match($content, $pattern)
     if (-not $match.Success) {
-        Log 'WARNING: could not find API_BASE line in frontend/index.html'
+        Log 'WARNING: could not find REMOTE_API_BASE line in frontend/index.html'
         return $false
     }
     $oldUrl = $match.Groups[1].Value
     if ($oldUrl -eq $newUrl) { return $false }
-    $updated = [regex]::Replace($content, $pattern, "const API_BASE = window.JARVIS_API_BASE || '$newUrl'")
+    $updated = [regex]::Replace($content, $pattern, "const REMOTE_API_BASE = '$newUrl'")
     Set-Content -Path $FrontendFile -Value $updated -Encoding UTF8 -NoNewline
-    Log "frontend/index.html API_BASE updated: $oldUrl -> $newUrl"
+    Log "frontend/index.html REMOTE_API_BASE updated: $oldUrl -> $newUrl"
     return $true
 }
 
@@ -155,13 +155,13 @@ function Push-FrontendUpdate($newUrl) {
     try {
         # Never let the deployment watchdog commit feature work that happens to
         # be in frontend/index.html. Auto-push is allowed only when every changed
-        # content line is the single API_BASE fallback URL.
+        # content line is the single REMOTE_API_BASE fallback URL.
         $diffLines = git diff --unified=0 -- frontend/index.html 2>$null
         $contentChanges = @($diffLines | Where-Object {
             ($_ -match '^[+-]') -and ($_ -notmatch '^(---|\+\+\+)')
         })
         $unsafeChanges = @($contentChanges | Where-Object {
-            $_ -notmatch "^[+-]const API_BASE = window\.JARVIS_API_BASE \|\| 'https://[a-zA-Z0-9-]+\.trycloudflare\.com';$"
+            $_ -notmatch "^[+-]const REMOTE_API_BASE = 'https://[a-zA-Z0-9-]+\.trycloudflare\.com';$"
         })
         if ($unsafeChanges.Count -gt 0 -or $contentChanges.Count -gt 2) {
             Log 'SECURITY: skipped auto-commit because frontend/index.html contains non-URL changes.'
@@ -173,7 +173,7 @@ function Push-FrontendUpdate($newUrl) {
             git commit -m "chore: auto-update tunnel URL ($newUrl)" 2>$null | Out-Null
             $pushOutput = git push 2>&1 | Out-String
             if ($LASTEXITCODE -eq 0) {
-                Log 'Pushed updated API_BASE to GitHub.'
+                Log 'Pushed updated REMOTE_API_BASE to GitHub.'
             } else {
                 Log "Git push FAILED (exit $LASTEXITCODE): $pushOutput"
             }

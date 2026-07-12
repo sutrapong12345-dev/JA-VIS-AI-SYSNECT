@@ -193,6 +193,21 @@ venv\Scripts\python.exe -m unittest discover -s tests -v
 - Shell ไม่ทำงาน
 - Audit chain แสดง `valid: true`
 - CORS ยอมเฉพาะ frontend origin
+- Response มี `X-Request-ID` และ error payload มี `request_id`
+- Provider ที่ติด quota/timeout เข้า cooldown และ fallback ไม่ลองตัวเดิมซ้ำทันที
+- Hologram แสดง stage จาก SSE โดยไม่บล็อกช่องพิมพ์หรือปุ่ม Stop
+
+### Provider Circuit Breaker
+
+ค่าปริยายพัก provider ที่ timeout/connection error 60 วินาที และ quota 300 วินาที:
+
+```text
+PROVIDER_COOLDOWN_SECONDS=60
+PROVIDER_QUOTA_COOLDOWN_SECONDS=300
+```
+
+สถานะ runtime แสดงใน `GET /api/token-status` สำหรับ Admin ได้แก่จำนวน failure,
+เวลาพักที่เหลือ และเวลาสำเร็จล่าสุด เมื่อ provider ตอบสำเร็จ circuit จะปิดทันที
 
 ## 10. AI Quality Gate และ Fine-tuning
 

@@ -44,6 +44,15 @@
     pointer-events: none;
     z-index: 1;
   }
+
+  .network-banner {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1300;
+    width: min(560px, calc(100vw - 24px)); padding: 9px 14px;
+    border: 1px solid var(--red); background: rgba(35, 5, 12, .96); color: #ffd7d7;
+    box-shadow: 0 8px 30px rgba(0,0,0,.45); text-align: center;
+    font-family: 'Share Tech Mono', monospace; font-size: 11px;
+  }
+  .network-banner[hidden] { display: none; }
   
   #bg-canvas {
     position: fixed; inset: 0;
@@ -538,6 +547,51 @@
   #main-interface.panels-hidden .panel-left, #main-interface.panels-hidden .panel-right { display: none; }
   #main-interface.panels-hidden .panel-center { grid-column: 2; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  /* ===== JARVIS HOLOGRAPHIC ACTIVITY PROJECTOR =====
+     Canvas renders the moving 3D wireframe; HTML carries readable live status. */
+  .hologram-activity {
+    --holo-color: #00d9ff; --holo-rgb: 0, 217, 255;
+    position: absolute; inset: 54px 8px 70px; z-index: 20; overflow: hidden;
+    border: 1px solid rgba(var(--holo-rgb), .45);
+    background:
+      radial-gradient(circle at 50% 46%, rgba(var(--holo-rgb), .11), transparent 34%),
+      linear-gradient(180deg, rgba(2,8,18,.94), rgba(2,11,24,.86));
+    box-shadow: inset 0 0 70px rgba(var(--holo-rgb), .08), 0 0 32px rgba(var(--holo-rgb), .13);
+    backdrop-filter: blur(7px); pointer-events: none;
+    animation: holoMaterialize .28s ease-out;
+  }
+  .hologram-activity[hidden] { display: none; }
+  .hologram-activity[data-state="listening"] { --holo-color:#ffb800; --holo-rgb:255,184,0; }
+  .hologram-activity[data-state="web_search"] { --holo-color:#ffb800; --holo-rgb:255,184,0; }
+  .hologram-activity[data-state="data_search"] { --holo-color:#00ff88; --holo-rgb:0,255,136; }
+  .hologram-activity[data-state="executing"] { --holo-color:#ff7a3d; --holo-rgb:255,122,61; }
+  .hologram-activity[data-state="success"] { --holo-color:#00ff88; --holo-rgb:0,255,136; }
+  .hologram-activity[data-state="error"] { --holo-color:#ff3b3b; --holo-rgb:255,59,59; }
+  #hologram-canvas { position:absolute; inset:0; width:100%; height:100%; opacity:.94; }
+  .holo-scanline { position:absolute; left:0; right:0; height:1px; top:0; background:linear-gradient(90deg,transparent,var(--holo-color),transparent); box-shadow:0 0 12px var(--holo-color); animation:holoScan 2.8s linear infinite; opacity:.65; }
+  .holo-noise { position:absolute; inset:0; opacity:.12; background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(var(--holo-rgb),.14) 4px); animation:holoFlicker 1.8s steps(2) infinite; }
+  .holo-corners::before, .holo-corners::after { content:''; position:absolute; width:45px; height:45px; border:2px solid var(--holo-color); }
+  .holo-corners::before { left:10px; top:10px; border-right:0; border-bottom:0; }
+  .holo-corners::after { right:10px; bottom:10px; border-left:0; border-top:0; }
+  .holo-header { position:absolute; left:18px; right:18px; top:15px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .holo-kicker { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; color:var(--holo-color); }
+  .holo-live { display:flex; align-items:center; gap:6px; font-family:'Share Tech Mono',monospace; font-size:9px; color:var(--holo-color); }
+  .holo-live::before { content:''; width:6px; height:6px; border-radius:50%; background:var(--holo-color); box-shadow:0 0 10px var(--holo-color); animation:dotPulse 1s infinite; }
+  .holo-status-card { position:absolute; left:18px; bottom:18px; width:min(440px,calc(100% - 36px)); padding:12px 14px; border-left:2px solid var(--holo-color); background:linear-gradient(90deg,rgba(2,13,28,.92),rgba(2,13,28,.42)); }
+  .holo-title { font-family:'Orbitron',sans-serif; font-size:15px; letter-spacing:2px; color:var(--holo-color); text-shadow:0 0 14px rgba(var(--holo-rgb),.6); }
+  .holo-detail { margin-top:5px; color:var(--text); font-size:13px; line-height:1.35; }
+  .holo-progress { height:3px; margin-top:10px; background:rgba(var(--holo-rgb),.14); overflow:hidden; }
+  .holo-progress-bar { height:100%; width:12%; background:var(--holo-color); box-shadow:0 0 12px var(--holo-color); transition:width .35s ease; position:relative; }
+  .holo-progress-bar.indeterminate { width:35%; animation:holoProgress 1.5s ease-in-out infinite; }
+  .holo-telemetry { position:absolute; right:18px; top:48px; width:150px; display:grid; gap:6px; }
+  .holo-telemetry-row { display:flex; justify-content:space-between; gap:8px; padding:5px 7px; border:1px solid rgba(var(--holo-rgb),.18); background:rgba(2,13,28,.58); font-family:'Share Tech Mono',monospace; font-size:8px; }
+  .holo-telemetry-row span:first-child { color:var(--text-dim); }
+  .holo-telemetry-row span:last-child { color:var(--holo-color); text-align:right; }
+  @keyframes holoMaterialize { from{opacity:0;transform:scale(.96);filter:blur(7px)} to{opacity:1;transform:scale(1);filter:blur(0)} }
+  @keyframes holoScan { from{transform:translateY(0)} to{transform:translateY(430px)} }
+  @keyframes holoFlicker { 0%,100%{opacity:.08} 50%{opacity:.16} }
+  @keyframes holoProgress { 0%{transform:translateX(-120%)} 100%{transform:translateX(330%)} }
   
   /* Arc Reactor */
   .arc-reactor-wrap {
@@ -815,12 +869,14 @@
     max-width: 700px;
     display: flex;
     gap: 8px;
-    align-items: center;
+    align-items: flex-end;
     padding: 8px;
     background: rgba(0, 20, 40, 0.6);
     border: 1px solid var(--border);
     transition: all 0.3s ease;
   }
+
+  .composer-field { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   
   .input-area:focus-within {
     border-color: var(--cyan);
@@ -839,19 +895,22 @@
   }
   
   #user-input {
-    flex: 1;
+    width: 100%; min-height: 38px; max-height: 120px; resize: none; overflow-y: auto;
     background: transparent;
     border: none;
     outline: none;
     color: var(--text);
     font-family: 'Rajdhani', sans-serif;
     font-size: 15px;
-    padding: 8px 12px;
+    padding: 7px 12px 3px; line-height: 1.4;
     letter-spacing: 0.5px;
     user-select: text;  /* body is user-select:none — re-enable for typing/editing */
   }
   
   #user-input::placeholder { color: var(--text-dim); }
+  .composer-meta { display: flex; justify-content: space-between; gap: 10px; padding: 0 12px 3px; font-family: 'Share Tech Mono', monospace; font-size: 8px; color: var(--text-dim); }
+  #input-counter.warn { color: var(--gold); }
+  #input-counter.limit { color: var(--red); }
   
   .input-btn {
     width: 40px; height: 40px;
@@ -907,6 +966,9 @@
   .model-select:focus { border-color: var(--cyan); }
   .model-switch-msg { margin-top: 4px; font-family: 'Share Tech Mono', monospace; font-size: 10px; }
   .token-model-tag { color: var(--text-dim); font-size: 8px; margin-left: 4px; }
+  .provider-state { font-size: 8px; margin-left: 5px; }
+  .provider-state.ready { color: var(--green); }
+  .provider-state.cooldown { color: var(--red); }
   .upload-file-icon { margin-right: 6px; }
   .upload-file-icon.image { color: var(--green); }
   .upload-file-icon.document { color: var(--cyan); }
@@ -1072,6 +1134,8 @@
   }
   .auth-btn:hover { background: rgba(0, 217, 255, 0.2); border-color: var(--cyan); }
   .auth-btn.primary { background: rgba(0, 217, 255, 0.18); border-color: var(--border-bright); }
+  .auth-btn.danger { color: var(--red); border-color: rgba(255,59,59,.55); background: rgba(255,59,59,.12); }
+  .auth-btn.danger:hover { background: rgba(255,59,59,.25); border-color: var(--red); }
   .auth-panel.shake { animation: authShake 0.4s; }
   @keyframes authShake {
     0%, 100% { transform: translateX(0); }
@@ -1234,6 +1298,11 @@
     .conversation-name { font-size: 9px; }
     .toolbar-label { display: none; }
     .toolbar-btn { width: 30px; min-width: 30px; padding: 0; }
+    .hologram-activity { inset:48px 4px 58px; }
+    .holo-telemetry { display:none; }
+    .holo-title { font-size:11px; letter-spacing:1px; }
+    .holo-detail { font-size:11px; }
+    .holo-status-card { left:10px; bottom:10px; width:calc(100% - 20px); }
 
     /* Footer: 3 items no longer fit one line on a phone */
     .hud-bottom { font-size: 9px; padding: 0 10px; flex-wrap: wrap; gap: 2px 10px; justify-content: center; text-align: center; }
@@ -1257,6 +1326,7 @@
 <body>
 
 <canvas id="bg-canvas"></canvas>
+<div id="network-banner" class="network-banner" role="status" aria-live="assertive" hidden>การเชื่อมต่อ Backend ขาดหาย — ระบบจะลองใหม่เมื่อเครือข่ายกลับมา</div>
 
 <!-- BOOT SCREEN -->
 <div id="boot-screen">
@@ -1379,8 +1449,31 @@
       <div class="conversation-actions">
         <button class="toolbar-btn" id="dashboard-btn" title="กลับหน้า Dashboard" aria-label="กลับหน้า Dashboard"><i class="fas fa-gauge-high"></i><span class="toolbar-label">Dashboard</span></button>
         <button class="toolbar-btn active" id="panels-btn" title="เปิดหรือซ่อนแผงสถานะ" aria-label="เปิดหรือซ่อนแผงสถานะ" aria-pressed="true"><i class="fas fa-table-columns"></i><span class="toolbar-label">Panels</span></button>
+        <button class="toolbar-btn active" id="hologram-btn" title="เปิดหรือปิด JARVIS Hologram" aria-label="เปิดหรือปิด JARVIS Hologram" aria-pressed="true"><i class="fas fa-atom"></i><span class="toolbar-label">Holo</span></button>
         <button class="toolbar-btn" id="reconnect-btn" title="ตรวจและเชื่อมต่อ Backend ใหม่" aria-label="เชื่อมต่อ Backend ใหม่"><i class="fas fa-rotate"></i></button>
         <button class="toolbar-btn danger" id="new-chat-btn" title="เริ่มบทสนทนาใหม่" aria-label="เริ่มบทสนทนาใหม่"><i class="fas fa-plus"></i><span class="toolbar-label">New</span></button>
+      </div>
+    </div>
+
+    <div id="hologram-activity" class="hologram-activity" data-state="thinking" role="status" aria-live="polite" hidden>
+      <canvas id="hologram-canvas" aria-hidden="true"></canvas>
+      <div class="holo-noise" aria-hidden="true"></div>
+      <div class="holo-scanline" aria-hidden="true"></div>
+      <div class="holo-corners" aria-hidden="true"></div>
+      <div class="holo-header">
+        <div class="holo-kicker">J.A.R.V.I.S. · HOLOGRAPHIC PROJECTOR</div>
+        <div class="holo-live" id="holo-live">LIVE PROCESS</div>
+      </div>
+      <div class="holo-telemetry" aria-hidden="true">
+        <div class="holo-telemetry-row"><span>STAGE</span><span id="holo-stage">ANALYZE</span></div>
+        <div class="holo-telemetry-row"><span>ENGINE</span><span id="holo-engine">JARVIS CORE</span></div>
+        <div class="holo-telemetry-row"><span>ELAPSED</span><span id="holo-elapsed">0.0s</span></div>
+        <div class="holo-telemetry-row"><span>SECURITY</span><span id="holo-security">VERIFIED</span></div>
+      </div>
+      <div class="holo-status-card">
+        <div class="holo-title" id="holo-title">กำลังประมวลผลคำสั่ง</div>
+        <div class="holo-detail" id="holo-detail">วิเคราะห์บริบทและเตรียมระบบที่เกี่ยวข้อง</div>
+        <div class="holo-progress"><div id="holo-progress-bar" class="holo-progress-bar indeterminate"></div></div>
       </div>
     </div>
     
@@ -1403,7 +1496,10 @@
     <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="ประวัติการสนทนา"></div>
     
     <div class="input-area" id="input-area">
-      <input type="text" id="user-input" placeholder="พิมพ์คำสั่งหรือคำถามของคุณ..." autocomplete="off">
+      <div class="composer-field">
+        <textarea id="user-input" rows="1" maxlength="8000" placeholder="พิมพ์คำสั่งหรือคำถามของคุณ..." autocomplete="off" aria-label="ข้อความถึง J.A.R.V.I.S."></textarea>
+        <div class="composer-meta"><span>Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่</span><span id="input-counter">0 / 8,000</span></div>
+      </div>
       <input type="file" id="file-upload" style="display: none;" accept=".txt,.pdf,.docx,image/*">
       <button class="input-btn" id="upload-btn" title="อัปโหลดเอกสารหรือรูปภาพ" aria-label="อัปโหลดเอกสารหรือรูปภาพ">
         <i class="fas fa-paperclip"></i>
@@ -1454,7 +1550,7 @@
   <!-- BOTTOM HUD -->
   <footer class="hud-bottom">
     <div>GEO: <span id="geo-coords">13.7563°N 100.5018°E</span></div>
-    <div>J.A.R.V.I.S. <span>v10.1.0</span> · SYSNECT <span>AI AGENT</span></div>
+    <div>J.A.R.V.I.S. <span>v10.2.0</span> · SYSNECT <span>AI AGENT</span></div>
     <div>ENCRYPTION: <span>AES-256</span> · STATUS: <span id="conn-status">SECURE</span></div>
   </footer>
   
@@ -1473,6 +1569,23 @@
     <div class="auth-actions">
       <button class="auth-btn primary" id="auth-submit">AUTHENTICATE</button>
       <button class="auth-btn" id="auth-cancel">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONSISTENT CONFIRMATION MODAL (replaces browser confirm/prompt) -->
+<div id="confirm-modal" class="auth-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+  <div class="auth-panel" id="confirm-panel">
+    <div class="auth-title" id="confirm-title"><i class="fas fa-triangle-exclamation"></i> ยืนยันการดำเนินการ</div>
+    <div class="auth-sub" id="confirm-message">กรุณาตรวจสอบรายละเอียดก่อนยืนยัน</div>
+    <div id="confirm-password-row" hidden>
+      <label class="auth-label" for="confirm-password">ADMIN PASSWORD</label>
+      <input id="confirm-password" class="auth-input" type="password" autocomplete="current-password" placeholder="รหัสผ่านแอดมิน">
+    </div>
+    <div class="auth-error" id="confirm-error"></div>
+    <div class="auth-actions">
+      <button class="auth-btn danger" id="confirm-submit">ยืนยัน</button>
+      <button class="auth-btn" id="confirm-cancel">ยกเลิก</button>
     </div>
   </div>
 </div>
@@ -1566,7 +1679,10 @@
 
 <script>
 // ===== GLOBAL CONFIG =====
-const API_BASE = window.JARVIS_API_BASE || 'https://slope-staying-kidney-rep.trycloudflare.com';
+const REMOTE_API_BASE = 'https://complexity-thompson-easier-respondent.trycloudflare.com';
+const IS_LOCAL_FRONTEND = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+const API_BASE = window.JARVIS_API_BASE || (IS_LOCAL_FRONTEND ? 'http://127.0.0.1:8000' : REMOTE_API_BASE);
+const DEFAULT_API_TIMEOUT_MS = 20000;
 
 // Session identity is issued by the backend. A client-generated ID is never an
 // authentication credential and cannot be used to open another user's session.
@@ -1574,11 +1690,31 @@ let sessionId = sessionStorage.getItem('jarvis_session_id') || '';
 let sessionToken = sessionStorage.getItem('jarvis_session_token') || '';
 let sessionBootstrapPromise = null;
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_API_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const externalSignal = options.signal;
+  const abortFromOutside = () => controller.abort(externalSignal.reason || new DOMException('ยกเลิกคำขอ', 'AbortError'));
+  if (externalSignal) {
+    if (externalSignal.aborted) abortFromOutside();
+    else externalSignal.addEventListener('abort', abortFromOutside, { once: true });
+  }
+  const timer = timeoutMs > 0 ? setTimeout(
+    () => controller.abort(new DOMException('หมดเวลารอการตอบกลับ', 'TimeoutError')),
+    timeoutMs
+  ) : null;
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener('abort', abortFromOutside);
+  }
+}
+
 async function ensureSecureSession(forceNew = false) {
   if (!forceNew && sessionId && sessionToken) return;
   if (sessionBootstrapPromise) return sessionBootstrapPromise;
   sessionBootstrapPromise = (async () => {
-    const response = await fetch(API_BASE + '/api/session', { method: 'POST' });
+    const response = await fetchWithTimeout(API_BASE + '/api/session', { method: 'POST' });
     if (!response.ok) throw new Error('ไม่สามารถเริ่ม secure session ได้');
     const data = await response.json();
     sessionId = data.session_id;
@@ -1588,6 +1724,10 @@ async function ensureSecureSession(forceNew = false) {
   })();
   try {
     await sessionBootstrapPromise;
+    setConnectionState(true, 'Secure Session พร้อมใช้งาน');
+  } catch (error) {
+    setConnectionState(false, error.name === 'TimeoutError' ? 'หมดเวลารอ Secure Session' : 'เริ่ม Secure Session ไม่สำเร็จ');
+    throw error;
   } finally {
     sessionBootstrapPromise = null;
   }
@@ -1597,7 +1737,18 @@ async function apiFetch(path, options = {}, allowRetry = true) {
   await ensureSecureSession();
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', 'Bearer ' + sessionToken);
-  const response = await fetch(API_BASE + path, { ...options, headers });
+  headers.set('X-Request-ID', 'web_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20));
+  const timeoutMs = options.timeoutMs === undefined ? DEFAULT_API_TIMEOUT_MS : options.timeoutMs;
+  const fetchOptions = { ...options, headers };
+  delete fetchOptions.timeoutMs;
+  let response;
+  try {
+    response = await fetchWithTimeout(API_BASE + path, fetchOptions, timeoutMs);
+    setConnectionState(true, 'Backend พร้อมใช้งาน');
+  } catch (error) {
+    setConnectionState(false, error.name === 'TimeoutError' ? 'Backend ตอบช้าเกินกำหนด' : 'เชื่อมต่อ Backend ไม่ได้');
+    throw error;
+  }
   if (response.status === 401 && allowRetry) {
     sessionStorage.removeItem('jarvis_session_id');
     sessionStorage.removeItem('jarvis_session_token');
@@ -1652,7 +1803,12 @@ function runBoot() {
       mainInterface.classList.add('visible');
       setTimeout(() => {
         bootScreen.style.display = 'none';
-        initJarvis();
+        initJarvis().catch(error => {
+          console.error('JARVIS initialization failed:', error);
+          setConnectionState(false, 'เริ่มระบบหลังบ้านไม่สำเร็จ');
+          statusTyping.textContent = 'BACKEND OFFLINE · USE RECONNECT';
+          finishHologram(false, 'Backend Offline', 'หน้าเว็บพร้อมใช้งาน แต่ยังเชื่อมต่อระบบหลังบ้านไม่ได้');
+        });
       }, 800);
     }, 600);
   }
@@ -1825,6 +1981,7 @@ modelSelect.addEventListener('change', async () => {
   if (!chosen) return;
   modelSwitchMsg.textContent = 'กำลังเปลี่ยน...';
   modelSwitchMsg.style.color = 'var(--jvdim, #7a8a99)';
+  setHologramActivity('processing', 'กำลังสลับ AI Engine', `ตรวจการตั้งค่าและเปลี่ยน Provider เป็น ${chosen.toUpperCase()}`, { stage: 'MODEL SWITCH', engine: chosen });
   try {
     const res = await apiFetch('/api/models/switch', {
       method: 'POST',
@@ -1837,6 +1994,7 @@ modelSelect.addEventListener('change', async () => {
       modelSwitchMsg.textContent = `เปลี่ยนเป็น ${chosen.toUpperCase()} แล้ว`;
       fetchHealth();
       loadModelOptions();
+      finishHologram(true, 'เปลี่ยน AI Engine สำเร็จ', `ระบบพร้อมใช้ ${chosen.toUpperCase()} สำหรับคำขอถัดไป`);
     } else {
       modelSwitchMsg.style.color = 'var(--red, #ff4d4d)';
       modelSwitchMsg.textContent = data.message || 'เปลี่ยนไม่สำเร็จ';
@@ -1845,6 +2003,7 @@ modelSelect.addEventListener('change', async () => {
   } catch (err) {
     modelSwitchMsg.style.color = 'var(--red, #ff4d4d)';
     modelSwitchMsg.textContent = 'เชื่อมต่อไม่ได้';
+    finishHologram(false, 'เปลี่ยน AI Engine ไม่สำเร็จ', 'Provider ไม่พร้อมหรือ Backend ติดต่อไม่ได้');
   }
 });
 
@@ -1871,23 +2030,28 @@ async function fetchTokenStatus() {
     const res = await apiFetch('/api/token-status');
     const data = await res.json();
     const providers = data.providers || {};
+    const runtime = data.runtime || {};
     const order = ['gemini', 'cerebras', 'groq', 'claude', 'ollama'];
     const html = order.filter(name => providers[name]).map(name => {
       const p = providers[name];
+      const rt = runtime[name] || {};
       const label = TOKEN_STATUS_LABELS[name] || name.toUpperCase();
       const modelTag = p.model ? `<span class="token-model-tag">${p.model}</span>` : '';
+      const stateTag = rt.available === false
+        ? `<span class="provider-state cooldown">พัก ${rt.cooldown_seconds || 0}s</span>`
+        : '<span class="provider-state ready">พร้อม</span>';
       if (!p.configured) {
         return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}</span><span class="metric-value">ไม่ได้ตั้งค่า</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
       }
       if (p.percent === null || p.percent === undefined) {
         const note = name === 'ollama' ? 'ไม่จำกัด (ในเครื่อง)' : 'ไม่มีลิมิตรายวัน';
-        return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}${modelTag}</span><span class="metric-value">${p.tokens_today.toLocaleString()} token · ${note}</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
+        return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}${modelTag}${stateTag}</span><span class="metric-value">${p.tokens_today.toLocaleString()} token · ${note}</span></div><div class="metric-bar"><div class="metric-fill" style="width:0%"></div></div></div>`;
       }
       const unit = p.cap_metric === 'requests' ? 'คำขอ' : 'token';
       const used = p.cap_metric === 'requests' ? p.requests_today : p.tokens_today;
       const barColor = p.percent >= 90 ? 'background:#ff4d4d;' : (p.percent >= 70 ? 'background:#ffb020;' : '');
       const percentLabel = p.percent > 100 ? `เกินโควต้า (${p.percent}%)` : `${p.percent}%`;
-      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}${modelTag}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${percentLabel})</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
+      return `<div class="metric"><div class="metric-head"><span class="metric-name">${label}${modelTag}${stateTag}</span><span class="metric-value">${used.toLocaleString()} / ${p.cap.toLocaleString()} ${unit} (${percentLabel})</span></div><div class="metric-bar"><div class="metric-fill" style="width:${Math.min(p.percent, 100)}%;${barColor}"></div></div></div>`;
     }).join('');
     document.getElementById('token-status-list').innerHTML = html || '<div class="log-empty">ไม่มีข้อมูล</div>';
   } catch (err) {
@@ -2352,6 +2516,169 @@ function drawReactorVisualizer() {
 }
 drawReactorVisualizer();
 
+// ===== JARVIS HOLOGRAPHIC ACTIVITY PROJECTOR =====
+const hologramEl = document.getElementById('hologram-activity');
+const hologramCanvas = document.getElementById('hologram-canvas');
+const hologramCtx = hologramCanvas.getContext('2d');
+const holoTitle = document.getElementById('holo-title');
+const holoDetail = document.getElementById('holo-detail');
+const holoStage = document.getElementById('holo-stage');
+const holoEngine = document.getElementById('holo-engine');
+const holoElapsed = document.getElementById('holo-elapsed');
+const holoProgressBar = document.getElementById('holo-progress-bar');
+let hologramEnabled = localStorage.getItem('jarvis_hologram_enabled') !== 'false';
+let hologramStartedAt = 0;
+let hologramHideTimer = null;
+let hologramState = 'thinking';
+
+const HOLOGRAM_PALETTE = {
+  thinking: [0, 217, 255], processing: [0, 217, 255], searching: [0, 217, 255],
+  web_search: [255, 184, 0], data_search: [0, 255, 136], executing: [255, 122, 61],
+  uploading: [0, 255, 136], listening: [255, 184, 0], success: [0, 255, 136], error: [255, 59, 59]
+};
+
+function setHologramActivity(state, title, detail, options = {}) {
+  if (!hologramEnabled) return;
+  clearTimeout(hologramHideTimer);
+  hologramState = state || 'thinking';
+  hologramStartedAt = performance.now();
+  hologramEl.dataset.state = hologramState;
+  hologramEl.hidden = false;
+  holoTitle.textContent = title || 'กำลังประมวลผล';
+  holoDetail.textContent = detail || 'JARVIS Core กำลังเตรียมระบบที่เกี่ยวข้อง';
+  holoStage.textContent = String(options.stage || state || 'PROCESS').toUpperCase();
+  holoEngine.textContent = String(options.engine || document.getElementById('ai-provider').textContent || 'JARVIS CORE').toUpperCase();
+  const progress = Number(options.progress);
+  if (Number.isFinite(progress)) {
+    holoProgressBar.classList.remove('indeterminate');
+    holoProgressBar.style.width = Math.max(0, Math.min(100, progress)) + '%';
+  } else {
+    holoProgressBar.classList.add('indeterminate');
+    holoProgressBar.style.width = '35%';
+  }
+}
+
+function finishHologram(success, title, detail, delay = 1800) {
+  if (!hologramEnabled) return;
+  setHologramActivity(success ? 'success' : 'error', title, detail, {
+    stage: success ? 'COMPLETE' : 'ERROR', progress: 100
+  });
+  hologramHideTimer = setTimeout(() => { hologramEl.hidden = true; }, delay);
+}
+
+function hideHologram() {
+  clearTimeout(hologramHideTimer);
+  hologramEl.hidden = true;
+}
+
+document.getElementById('hologram-btn').addEventListener('click', (event) => {
+  hologramEnabled = !hologramEnabled;
+  localStorage.setItem('jarvis_hologram_enabled', String(hologramEnabled));
+  event.currentTarget.classList.toggle('active', hologramEnabled);
+  event.currentTarget.setAttribute('aria-pressed', String(hologramEnabled));
+  if (hologramEnabled) {
+    setHologramActivity('success', 'HOLOGRAM ONLINE', 'ระบบแสดงสถานะงานแบบ Holographic พร้อมใช้งาน', { stage: 'READY', progress: 100 });
+    hologramHideTimer = setTimeout(hideHologram, 1400);
+  } else {
+    hideHologram();
+  }
+});
+document.getElementById('hologram-btn').classList.toggle('active', hologramEnabled);
+document.getElementById('hologram-btn').setAttribute('aria-pressed', String(hologramEnabled));
+
+(function animateHolographicProjector() {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (hologramEl.hidden) return;
+    const rect = hologramCanvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    if (hologramCanvas.width !== width || hologramCanvas.height !== height) {
+      hologramCanvas.width = width; hologramCanvas.height = height;
+    }
+    const ctx = hologramCtx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+    const rgb = HOLOGRAM_PALETTE[hologramState] || HOLOGRAM_PALETTE.thinking;
+    const color = (alpha) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+    const t = reducedMotion ? 0 : now / 1000;
+    const cx = w * .5, cy = h * .47;
+    const radius = Math.min(w, h) * (w < 520 ? .22 : .27);
+
+    // Perspective floor grid.
+    ctx.lineWidth = .6;
+    for (let i = -7; i <= 7; i++) {
+      ctx.strokeStyle = color(.08 + (i % 2 === 0 ? .035 : 0));
+      ctx.beginPath();
+      ctx.moveTo(cx + i * 18, cy + radius * .62);
+      ctx.lineTo(cx + i * 65, h);
+      ctx.stroke();
+    }
+    for (let i = 0; i < 8; i++) {
+      const y = cy + radius * .65 + Math.pow(i / 7, 1.7) * (h - cy - radius * .65);
+      ctx.strokeStyle = color(.08);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    // Three orbital rings around the projected core.
+    ctx.save(); ctx.translate(cx, cy);
+    for (let ring = 0; ring < 3; ring++) {
+      ctx.save();
+      ctx.rotate(t * (.18 + ring * .07) * (ring === 1 ? -1 : 1));
+      ctx.scale(1, .34 + ring * .13);
+      ctx.setLineDash([8 + ring * 2, 6]);
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = color(.28 - ring * .04);
+      ctx.beginPath(); ctx.arc(0, 0, radius * (1.12 + ring * .2), 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // Rotating wireframe globe built from true 3D latitude/longitude points.
+    const rotY = t * .52, rotX = -.32 + Math.sin(t * .35) * .08;
+    const points = [];
+    for (let latIndex = 1; latIndex < 12; latIndex++) {
+      const lat = -Math.PI / 2 + (latIndex / 12) * Math.PI;
+      for (let lonIndex = 0; lonIndex < 24; lonIndex++) {
+        const lon = (lonIndex / 24) * Math.PI * 2;
+        let x = Math.cos(lat) * Math.cos(lon), y = Math.sin(lat), z = Math.cos(lat) * Math.sin(lon);
+        const x1 = x * Math.cos(rotY) + z * Math.sin(rotY);
+        const z1 = -x * Math.sin(rotY) + z * Math.cos(rotY);
+        const y1 = y * Math.cos(rotX) - z1 * Math.sin(rotX);
+        const z2 = y * Math.sin(rotX) + z1 * Math.cos(rotX);
+        const perspective = 1 + z2 * .16;
+        points.push({ x: cx + x1 * radius * perspective, y: cy + y1 * radius * perspective, z: z2, latIndex, lonIndex });
+      }
+    }
+    for (const p of points) {
+      const alpha = .16 + (p.z + 1) * .24;
+      ctx.fillStyle = color(alpha);
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.z > .25 ? 1.5 : .8, 0, Math.PI * 2); ctx.fill();
+      if (p.lonIndex < 23) {
+        const q = points[(p.latIndex - 1) * 24 + p.lonIndex + 1];
+        if (q) { ctx.strokeStyle = color(alpha * .45); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); }
+      }
+    }
+    // Bright reactor core and orbiting data nodes.
+    const pulse = 1 + Math.sin(t * 3.2) * .08;
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * .34 * pulse);
+    gradient.addColorStop(0, color(.92)); gradient.addColorStop(.2, color(.38)); gradient.addColorStop(1, color(0));
+    ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(cx, cy, radius * .34 * pulse, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 8; i++) {
+      const a = t * (.45 + i * .012) + i * Math.PI / 4;
+      const rr = radius * (1.25 + (i % 3) * .14);
+      const nx = cx + Math.cos(a) * rr, ny = cy + Math.sin(a) * rr * .42;
+      ctx.fillStyle = color(.85); ctx.beginPath(); ctx.arc(nx, ny, 2 + (i % 2), 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = color(.18); ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(nx,ny); ctx.stroke();
+    }
+    holoElapsed.textContent = ((now - hologramStartedAt) / 1000).toFixed(1) + 's';
+  }
+  requestAnimationFrame(frame);
+})();
+
 function enterChatMode() {
   const mi = document.getElementById('main-interface');
   if (mi) mi.classList.add('chat-active');
@@ -2368,17 +2695,20 @@ async function processInput(input, options = {}) {
   const lower = input.trim().toLowerCase();
   if (lower === 'login' || lower === '[login]' || lower === 'เข้าสู่ระบบ') {
     userInput.value = '';
+    updateComposerState();
     openAuthModal();
     return;
   }
   if (lower === 'logout' || lower === '[logout]' || lower === 'ออกจากระบบ') {
     userInput.value = '';
+    updateComposerState();
     doLogout();
     return;
   }
 
   isProcessing = true;
   currentAbortController = new AbortController();
+  setHologramActivity('thinking', 'กำลังวิเคราะห์คำสั่ง', 'ตรวจบริบท สิทธิ์ ความจำ และ Knowledge ที่เกี่ยวข้อง', { stage: 'ANALYZE', engine: 'JARVIS CORE' });
   sendBtn.innerHTML = '<i class="fas fa-stop"></i>';
   sendBtn.title = 'หยุดการตอบกลับ';
 
@@ -2402,6 +2732,7 @@ async function processInput(input, options = {}) {
 
   addMessage('user', input);
   userInput.value = '';
+  updateComposerState();
   statusTyping.textContent = 'THINKING...';
 
   const el = addMessage('jarvis', '');
@@ -2409,15 +2740,25 @@ async function processInput(input, options = {}) {
 
   let acc = '';
   let finalReply = null;
+  let hologramStreaming = false;
 
   try {
     const resp = await apiFetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId }),
-      signal: currentAbortController.signal
+      signal: currentAbortController.signal,
+      timeoutMs: 180000
     });
-    if (!resp.ok || !resp.body) throw new Error('stream unavailable');
+    if (!resp.ok) {
+      let payload = {};
+      try { payload = await resp.json(); } catch (e) {}
+      const apiError = new Error(payload.message || 'คำขอไม่สำเร็จ');
+      apiError.apiStatus = resp.status;
+      apiError.requestId = payload.request_id || resp.headers.get('X-Request-ID') || '';
+      throw apiError;
+    }
+    if (!resp.body) throw new Error('stream unavailable');
 
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -2434,7 +2775,24 @@ async function processInput(input, options = {}) {
         if (!line) continue;
         let evt;
         try { evt = JSON.parse(line); } catch (e) { continue; }
+        if (evt.stage) {
+          const stageMap = {
+            thinking: ['thinking', 'กำลังเชื่อมต่อ AI Engine', 'ส่งบริบทที่ผ่านการตรวจสิทธิ์และรอการตอบกลับ', 'AI ROUTING'],
+            web_search: ['web_search', 'กำลังค้นข้อมูลบนอินเทอร์เน็ต', evt.detail || 'ค้นแหล่งข้อมูลล่าสุดที่เกี่ยวข้อง', 'WEB SEARCH'],
+            data_search: ['data_search', 'กำลังค้นข้อมูล SYSNECT', evt.detail || 'ค้นไฟล์โครงการภายในตามสิทธิ์ Admin', 'LOCAL DATA'],
+            executing: ['executing', 'กำลังใช้ Structured Tool', 'ตรวจ schema, role, arguments และ approval policy ก่อนดำเนินการ', 'TOOL WORKER']
+          };
+          const meta = stageMap[evt.stage] || ['processing', 'กำลังประมวลผล', evt.detail || evt.stage, evt.stage];
+          setHologramActivity(meta[0], meta[1], meta[2], { stage: meta[3], engine: document.getElementById('ai-provider').textContent });
+          // A backend stage interrupts generation (e.g. web search between two
+          // streamed answers) — let the next delta flip the HUD back to GENERATE.
+          hologramStreaming = false;
+        }
         if (evt.delta) {
+          if (!hologramStreaming) {
+            hologramStreaming = true;
+            setHologramActivity('processing', 'กำลังสร้างคำตอบ', 'รับข้อมูลจาก AI Engine และประกอบคำตอบแบบ real-time', { stage: 'GENERATE', engine: evt.provider || document.getElementById('ai-provider').textContent });
+          }
           acc += evt.delta;
           el.innerHTML = renderMarkdown(acc) + '<span class="jv-cursor">▌</span>';
           scrollChat(false); // respects the user scrolling up to read
@@ -2454,6 +2812,7 @@ async function processInput(input, options = {}) {
     if (text.includes('ADMIN MODE UNLOCKED')) setAdminBadge(true);
     speakText(text, continueVoiceLoop);
     statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+    finishHologram(true, 'ประมวลผลสำเร็จ', 'คำตอบถูกส่งและบันทึกใน Session เรียบร้อย');
   } catch (err) {
     if (err.name === 'AbortError') {
       // User pressed Stop — freeze whatever text already arrived, don't retry
@@ -2464,9 +2823,19 @@ async function processInput(input, options = {}) {
         ' <span class="stopped-tag">[หยุดแล้ว]</span>';
       scrollChat(false);
       statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+      finishHologram(false, 'หยุดการประมวลผลแล้ว', 'ผู้ใช้ยกเลิกคำตอบก่อนเสร็จ', 1200);
+      return;
+    }
+    if (err.name === 'TimeoutError' || (err.apiStatus && err.apiStatus < 500)) {
+      const requestRef = err.requestId ? ` (${err.requestId})` : '';
+      el.innerHTML = escapeHtml((err.message || 'คำขอไม่สำเร็จครับ') + requestRef);
+      statusTyping.textContent = err.name === 'TimeoutError' ? 'REQUEST TIMEOUT' : 'REQUEST REJECTED';
+      scrollChat(false);
+      finishHologram(false, err.name === 'TimeoutError' ? 'หมดเวลารอ Backend' : 'คำขอถูกปฏิเสธ', err.message || 'กรุณาตรวจรายละเอียดคำขอ');
       return;
     }
     console.error('stream failed, falling back:', err);
+    setHologramActivity('searching', 'กำลังสลับช่องทางสำรอง', 'Streaming ขัดข้อง กำลังเรียก API สำรองโดยอัตโนมัติ', { stage: 'FALLBACK', engine: 'AUTO ROUTER' });
     // Non-abort failures (network drop, backend error) still get the old
     // "retry via non-streaming endpoint" behavior below.
     // Fallback to the non-streaming endpoint
@@ -2477,6 +2846,7 @@ async function processInput(input, options = {}) {
         body: JSON.stringify({ message: input, weather: currentWeatherString, session_id: sessionId })
       });
       const d = await r.json();
+      if (!r.ok) throw new Error(d.message || 'คำขอไม่สำเร็จ');
       el.innerHTML = renderMarkdown(d.reply);
       scrollChat(false);
       if (d.provider) {
@@ -2485,10 +2855,12 @@ async function processInput(input, options = {}) {
       if (String(d.reply).includes('ADMIN MODE UNLOCKED')) setAdminBadge(true);
       speakText(d.reply, continueVoiceLoop);
       statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
+      finishHologram(true, 'ช่องทางสำรองตอบกลับแล้ว', 'ระบบกู้คืนการสนทนาและส่งคำตอบสำเร็จ');
     } catch (e2) {
       el.innerHTML = escapeHtml('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์ครับ');
       statusTyping.textContent = 'CONNECTION ERROR';
       speakText('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์ครับ', continueVoiceLoop);
+      finishHologram(false, 'การเชื่อมต่อล้มเหลว', 'ไม่สามารถติดต่อ Backend หรือ AI Provider ได้');
     }
   } finally {
     isProcessing = false;
@@ -2514,7 +2886,59 @@ function setConnectionState(online, detail) {
   pill.classList.toggle('offline', !online);
   pill.title = detail || '';
   document.getElementById('conn-status').textContent = online ? 'SECURE' : 'OFFLINE';
+  const banner = document.getElementById('network-banner');
+  if (banner) {
+    banner.hidden = online;
+    if (!online && detail) banner.textContent = detail + ' — กดปุ่มเชื่อมต่อใหม่เมื่อระบบพร้อม';
+  }
 }
+
+window.addEventListener('offline', () => setConnectionState(false, 'อุปกรณ์ไม่มีการเชื่อมต่อเครือข่าย'));
+window.addEventListener('online', () => {
+  setConnectionState(true, 'เครือข่ายกลับมาแล้ว กำลังตรวจ Backend');
+  fetchHealth();
+});
+
+// Unified secure confirmation dialog for destructive/high-impact actions.
+const confirmModal = document.getElementById('confirm-modal');
+const confirmTitle = document.getElementById('confirm-title');
+const confirmMessage = document.getElementById('confirm-message');
+const confirmPasswordRow = document.getElementById('confirm-password-row');
+const confirmPassword = document.getElementById('confirm-password');
+const confirmSubmit = document.getElementById('confirm-submit');
+let confirmationResolver = null;
+
+function requestConfirmation({ title, message, confirmLabel = 'ยืนยัน', requirePassword = false }) {
+  if (confirmationResolver) confirmationResolver({ confirmed: false, password: '' });
+  confirmTitle.innerHTML = '<i class="fas fa-triangle-exclamation"></i> ' + escapeHtml(title || 'ยืนยันการดำเนินการ');
+  confirmMessage.textContent = message || 'กรุณาตรวจสอบรายละเอียดก่อนยืนยัน';
+  confirmSubmit.textContent = confirmLabel;
+  confirmPasswordRow.hidden = !requirePassword;
+  confirmPassword.value = '';
+  document.getElementById('confirm-error').textContent = '';
+  confirmModal.hidden = false;
+  setTimeout(() => (requirePassword ? confirmPassword : confirmSubmit).focus(), 0);
+  return new Promise(resolve => { confirmationResolver = resolve; });
+}
+
+function closeConfirmation(confirmed) {
+  const resolve = confirmationResolver;
+  const password = confirmed ? confirmPassword.value : '';
+  confirmationResolver = null;
+  confirmPassword.value = '';
+  confirmModal.hidden = true;
+  if (resolve) resolve({ confirmed: !!confirmed, password });
+}
+
+confirmSubmit.addEventListener('click', () => closeConfirmation(true));
+document.getElementById('confirm-cancel').addEventListener('click', () => closeConfirmation(false));
+confirmModal.addEventListener('click', event => { if (event.target === confirmModal) closeConfirmation(false); });
+confirmPassword.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.isComposing) closeConfirmation(true);
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !confirmModal.hidden) closeConfirmation(false);
+});
 
 document.getElementById('dashboard-btn').addEventListener('click', () => {
   mainInterface.classList.remove('chat-active');
@@ -2531,13 +2955,16 @@ document.getElementById('reconnect-btn').addEventListener('click', async (event)
   btn.disabled = true;
   btn.querySelector('i').classList.add('fa-spin');
   statusTyping.textContent = 'CHECKING CONNECTION...';
+  setHologramActivity('searching', 'กำลังตรวจระบบเชื่อมต่อ', 'ตรวจ Secure Session, Backend, Security และ AI Engine', { stage: 'DIAGNOSTIC', engine: 'NETWORK CORE' });
   try {
     await ensureSecureSession();
     await Promise.all([fetchHealth(), fetchSystemStatus(), fetchAuthStatus(), fetchSecurityStatus()]);
     statusTyping.textContent = 'CONNECTED · SYSTEM READY';
+    finishHologram(true, 'เชื่อมต่อสำเร็จ', 'Backend และ Secure Session พร้อมใช้งาน');
   } catch (error) {
     setConnectionState(false, 'เชื่อมต่อใหม่ไม่สำเร็จ');
     statusTyping.textContent = 'CONNECTION ERROR';
+    finishHologram(false, 'เชื่อมต่อไม่สำเร็จ', 'กรุณาตรวจ Backend, Tunnel และเครือข่าย');
   } finally {
     btn.disabled = false;
     btn.querySelector('i').classList.remove('fa-spin');
@@ -2549,7 +2976,13 @@ document.getElementById('new-chat-btn').addEventListener('click', async () => {
     if (currentAbortController) currentAbortController.abort();
     return;
   }
-  if (!window.confirm('เริ่มบทสนทนาใหม่และล้างบริบทของ session นี้ใช่ไหมครับ?')) return;
+  const decision = await requestConfirmation({
+    title: 'เริ่มบทสนทนาใหม่',
+    message: 'ประวัติ บริบทสรุป เอกสารชั่วคราว และ Action ที่รอใน Session นี้จะถูกล้าง',
+    confirmLabel: 'เริ่มใหม่'
+  });
+  if (!decision.confirmed) return;
+  setHologramActivity('processing', 'กำลังเริ่ม Session สนทนาใหม่', 'ล้างบริบทเดิมอย่างปลอดภัย โดยคง Secure Session และบทบาทไว้', { stage: 'RESET', progress: 45 });
   try {
     const response = await apiFetch('/api/chat/reset', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2560,15 +2993,31 @@ document.getElementById('new-chat-btn').addEventListener('click', async () => {
     mainInterface.classList.remove('chat-active');
     addMessage('jarvis', 'เริ่มบทสนทนาใหม่แล้วครับ พร้อมช่วยงานต่อทันที');
     statusTyping.textContent = 'NEW CONVERSATION · SYSTEM READY';
+    finishHologram(true, 'พร้อมสำหรับบทสนทนาใหม่', 'บริบทเดิมถูกล้างเรียบร้อย');
   } catch (error) {
     addMessage('jarvis', 'ไม่สามารถเริ่มบทสนทนาใหม่ได้ครับ กรุณาตรวจการเชื่อมต่อ');
+    finishHologram(false, 'เริ่มบทสนทนาใหม่ไม่สำเร็จ', 'Backend ไม่ตอบรับการล้าง Session');
   }
 });
 
-// keydown + isComposing: Enter mid-Thai-IME composition must not fire a send
+// Auto-growing composer. Enter sends; Shift+Enter creates a new line.
+const inputCounter = document.getElementById('input-counter');
+function updateComposerState() {
+  userInput.style.height = 'auto';
+  userInput.style.height = Math.min(userInput.scrollHeight, 120) + 'px';
+  const length = userInput.value.length;
+  inputCounter.textContent = length.toLocaleString() + ' / 8,000';
+  inputCounter.classList.toggle('warn', length >= 7000 && length < 8000);
+  inputCounter.classList.toggle('limit', length >= 8000);
+}
+userInput.addEventListener('input', updateComposerState);
 userInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.isComposing) processInput(userInput.value);
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    processInput(userInput.value);
+  }
 });
+updateComposerState();
 
 // ===== AUTHENTICATION (login modal) =====
 const authModal = document.getElementById('auth-modal');
@@ -2743,13 +3192,19 @@ async function loadSecurityPanel() {
 }
 
 async function panicLockdown() {
-  if (!window.confirm('ยืนยันล็อกดาวน์ระบบหลังบ้านทันทีใช่ไหมครับ? (ผู้ใช้ทุกคนจะถูกปฏิเสธการเข้าถึงชั่วคราว)')) return;
+  const decision = await requestConfirmation({
+    title: 'Security Lockdown',
+    message: 'ผู้ใช้ทุก Session จะถูกปฏิเสธการเข้าถึงระบบหลังบ้านชั่วคราว ใช้เฉพาะเมื่อพบเหตุผิดปกติจริง',
+    confirmLabel: 'ล็อกดาวน์ทันที'
+  });
+  if (!decision.confirmed) return;
+  setHologramActivity('error', 'กำลังปิดผนึกระบบ', 'ตัดการเข้าถึง endpoint ที่ได้รับการป้องกันและบันทึก Audit Event', { stage: 'LOCKDOWN', progress: 60 });
   try {
     const d = await apiJSON('/api/security/lockdown', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId })
     });
-    if (d.status === 'ok') { adminToast('🛑 ล็อกดาวน์ระบบแล้ว'); await loadSecurityPanel(); }
+    if (d.status === 'ok') { adminToast('🛑 ล็อกดาวน์ระบบแล้ว'); finishHologram(false, 'SECURITY LOCKDOWN', 'ระบบหลังบ้านถูกปิดผนึกตามคำสั่งผู้ดูแลระบบ', 2600); await loadSecurityPanel(); }
     else adminToast(d.message || 'สั่งล็อกดาวน์ไม่สำเร็จ', true);
   } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
 }
@@ -2823,12 +3278,15 @@ function updateTrainingQualityUI(q) {
 async function validateDatasetUI() {
   const btn = document.getElementById('ap-quality-btn');
   btn.disabled = true;
+  setHologramActivity('processing', 'กำลังตรวจคุณภาพ AI Dataset', 'ตรวจข้อมูลซ้ำ ข้อมูลลับ ภาษาผิดปกติ และคำตอบที่เกินสิทธิ์', { stage: 'QUALITY GATE', engine: 'DATASET CORE' });
   try {
     const q = await apiJSON('/api/training/quality');
     updateTrainingQualityUI(q);
     adminToast(q.ready_for_training ? '✅ ชุดข้อมูลผ่านเกณฑ์พร้อมฝึก' : `⚠️ ตรวจแล้ว: ผ่าน ${q.accepted || 0}, คัดออก ${q.rejected || 0}`, !q.ready_for_training);
+    finishHologram(!!q.ready_for_training, q.ready_for_training ? 'Dataset ผ่าน Quality Gate' : 'Dataset ยังไม่ผ่านเกณฑ์', `คะแนน ${q.average_score || 0}/100 · ผ่าน ${q.accepted || 0} · คัดออก ${q.rejected || 0}`);
   } catch (e) {
     adminToast('ตรวจคุณภาพชุดข้อมูลไม่ได้', true);
+    finishHologram(false, 'ตรวจ Dataset ไม่สำเร็จ', 'ไม่สามารถอ่านหรือประเมินชุดข้อมูลได้');
   } finally {
     btn.disabled = false;
   }
@@ -2840,14 +3298,15 @@ async function teachFactUI() {
   if (!fact) { input.focus(); return; }
   const btn = document.getElementById('ap-teach-btn');
   btn.disabled = true;
+  setHologramActivity('uploading', 'กำลังบันทึกความรู้ใหม่', 'ตรวจข้อความ บันทึกลง Knowledge และสร้างดัชนี RAG ใหม่', { stage: 'LEARN', engine: 'KNOWLEDGE CORE' });
   try {
     const d = await apiJSON('/api/knowledge/teach', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fact, session_id: sessionId })
     });
-    if (d.status === 'ok') { input.value = ''; adminToast('🧠 ' + d.message); await loadLearnedFacts(); }
-    else adminToast(d.message || 'สอนไม่สำเร็จ', true);
-  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
+    if (d.status === 'ok') { input.value = ''; adminToast('🧠 ' + d.message); finishHologram(true, 'เรียนรู้สำเร็จ', 'Knowledge และ RAG index ถูกอัปเดตแล้ว'); await loadLearnedFacts(); }
+    else { adminToast(d.message || 'สอนไม่สำเร็จ', true); finishHologram(false, 'บันทึกความรู้ไม่สำเร็จ', d.message || 'ข้อมูลไม่ผ่านการตรวจสอบ'); }
+  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); finishHologram(false, 'บันทึกความรู้ไม่สำเร็จ', 'ไม่สามารถติดต่อ Backend ได้'); }
   btn.disabled = false;
 }
 
@@ -2855,16 +3314,22 @@ async function forgetFact(index) {
   // Deleting data always re-asks for the admin password, even though this
   // session is already logged in — a safeguard against a hijacked/careless
   // session (or someone else at the keyboard) wiping knowledge accidentally.
-  const password = window.prompt('ยืนยันการลบ: กรุณาใส่รหัสผ่านแอดมินอีกครั้งครับ');
-  if (password === null) return; // cancelled
+  const decision = await requestConfirmation({
+    title: 'ยืนยันลบความรู้',
+    message: 'รายการนี้จะถูกลบจาก learned.md และ RAG index กรุณายืนยันรหัสผ่านแอดมิน',
+    confirmLabel: 'ลบความรู้', requirePassword: true
+  });
+  if (!decision.confirmed) return;
+  const password = decision.password;
+  setHologramActivity('error', 'กำลังลบความรู้', 'ยืนยันสิทธิ์ แก้ไข learned.md และสร้างดัชนีใหม่', { stage: 'SECURE DELETE', progress: 45 });
   try {
     const d = await apiJSON('/api/knowledge/forget', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index, session_id: sessionId, password })
     });
-    if (d.status === 'ok') { adminToast('🗑️ ลบความรู้แล้ว'); await loadLearnedFacts(); }
-    else adminToast(d.message || 'ลบไม่สำเร็จ', true);
-  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); }
+    if (d.status === 'ok') { adminToast('🗑️ ลบความรู้แล้ว'); finishHologram(true, 'ลบความรู้สำเร็จ', 'รายการถูกนำออกและ RAG index อัปเดตแล้ว'); await loadLearnedFacts(); }
+    else { adminToast(d.message || 'ลบไม่สำเร็จ', true); finishHologram(false, 'ลบความรู้ไม่สำเร็จ', d.message || 'การยืนยันถูกปฏิเสธ'); }
+  } catch (e) { adminToast('เชื่อมต่อไม่ได้', true); finishHologram(false, 'ลบความรู้ไม่สำเร็จ', 'ไม่สามารถติดต่อ Backend ได้'); }
 }
 
 async function buildDatasetUI() {
@@ -2872,6 +3337,7 @@ async function buildDatasetUI() {
   const note = document.getElementById('ap-build-note');
   btn.disabled = true;
   note.textContent = 'กำลังสร้างชุดข้อมูล...';
+  setHologramActivity('processing', 'กำลังสร้าง Training Dataset', 'รวม Curated Examples และ Chat Logs ผ่าน Quality Gate แล้วแยก Train/Validation', { stage: 'DATA PIPELINE', engine: 'TRAINING CORE' });
   try {
     const d = await apiJSON('/api/training/build', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2882,9 +3348,10 @@ async function buildDatasetUI() {
       note.textContent = `✅ ผ่าน Quality Gate ${d.examples} คู่ · train ${d.train_examples || 0} · validation ${d.validation_examples || 0} · คัดออกจากต้นทาง ${q.source_rejected || 0}`;
       updateTrainingQualityUI(q);
       adminToast('🎓 สร้างชุดฝึกที่ผ่านการคัดกรองแล้ว ' + d.examples + ' คู่');
+      finishHologram(!!q.ready_for_training, q.ready_for_training ? 'Training Dataset พร้อมใช้งาน' : 'สร้าง Dataset แล้วแต่ยังไม่พร้อมฝึก', `${d.train_examples || 0} train · ${d.validation_examples || 0} validation · score ${q.average_score || 0}`);
       await loadTrainingStatus();
-    } else { note.textContent = d.message || 'สร้างไม่สำเร็จ'; adminToast(d.message || 'สร้างไม่สำเร็จ', true); }
-  } catch (e) { note.textContent = 'เชื่อมต่อไม่ได้'; adminToast('เชื่อมต่อไม่ได้', true); }
+    } else { note.textContent = d.message || 'สร้างไม่สำเร็จ'; adminToast(d.message || 'สร้างไม่สำเร็จ', true); finishHologram(false, 'สร้าง Dataset ไม่สำเร็จ', d.message || 'ข้อมูลไม่ผ่านการตรวจสอบ'); }
+  } catch (e) { note.textContent = 'เชื่อมต่อไม่ได้'; adminToast('เชื่อมต่อไม่ได้', true); finishHologram(false, 'สร้าง Dataset ไม่สำเร็จ', 'ไม่สามารถติดต่อ Backend ได้'); }
   btn.disabled = false;
 }
 
@@ -2969,6 +3436,7 @@ document.querySelectorAll('.cmd-chip').forEach(chip => {
     const fill = chip.getAttribute('data-fill');
     if (fill !== null) {
       userInput.value = fill;
+      updateComposerState();
       userInput.focus();
       return;
     }
@@ -3015,6 +3483,7 @@ async function uploadFile(file, isImage = false) {
   if (isProcessing) return;
   
   statusTyping.textContent = isImage ? 'ANALYZING IMAGE...' : 'READING DOCUMENT...';
+  setHologramActivity('uploading', isImage ? 'กำลังวิเคราะห์ภาพ Hologram' : 'กำลังอ่านเอกสาร', `${file.name || 'ไฟล์'} · ตรวจชนิดไฟล์และสร้างบริบทสำหรับ AI`, { stage: isImage ? 'VISUAL SCAN' : 'DOCUMENT INGEST', engine: isImage ? 'VISION CORE' : 'DOCUMENT CORE' });
   uploadBtn.style.color = 'var(--gold)';
   enterChatMode();
   
@@ -3030,14 +3499,17 @@ async function uploadFile(file, isImage = false) {
   try {
     const res = await apiFetch('/api/upload?session_id=' + encodeURIComponent(sessionId), {
       method: 'POST',
-      body: formData
+      body: formData,
+      timeoutMs: 120000
     });
     const data = await res.json();
     addMessage('jarvis', data.message);
     uploadBtn.style.color = data.status === 'success' ? 'var(--green)' : 'var(--red)';
+    finishHologram(data.status === 'success', data.status === 'success' ? 'ประมวลผลไฟล์สำเร็จ' : 'ประมวลผลไฟล์ไม่สำเร็จ', data.message || file.name);
   } catch(err) {
     addMessage('jarvis', 'อัปโหลดล้มเหลวครับ');
     uploadBtn.style.color = 'var(--red)';
+    finishHologram(false, 'อัปโหลดล้มเหลว', 'ไฟล์ไม่ถูกส่งถึง Backend หรือหมดเวลารอ');
   }
   
   setTimeout(() => uploadBtn.style.color = 'var(--cyan)', 3000);
@@ -3086,6 +3558,7 @@ visionBtn.addEventListener('click', async () => {
     return;
   }
   visionBtn.classList.add('scanning');
+  setHologramActivity('uploading', 'กำลังสแกน Visual Cortex', 'จับภาพหน้าจอผ่านสิทธิ์ Admin และเตรียมส่งเข้า Vision AI', { stage: 'SCREEN SCAN', engine: 'VISION CORE' });
   statusTyping.textContent = 'SCANNING VISUAL CORTEX...';
   try {
     const res = await apiFetch('/api/os/screenshot?session_id=' + encodeURIComponent(sessionId));
@@ -3097,10 +3570,12 @@ visionBtn.addEventListener('click', async () => {
     } else {
       enterChatMode();
       addMessage('jarvis', data.message || 'ไม่สามารถสแกนหน้าจอได้ครับ');
+      finishHologram(false, 'สแกนหน้าจอไม่สำเร็จ', data.message || 'ระบบปฏิเสธการจับภาพหน้าจอ');
     }
   } catch (err) {
     enterChatMode();
     addMessage('jarvis', 'ระบบ Vision ขัดข้องครับ ไม่สามารถเชื่อมต่อ Backend ได้');
+    finishHologram(false, 'Visual Cortex ขัดข้อง', 'ไม่สามารถติดต่อ Backend หรือจับภาพหน้าจอได้');
   }
   visionBtn.classList.remove('scanning');
   statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
@@ -3115,22 +3590,28 @@ clipboardBtn.addEventListener('click', async () => {
     return;
   }
   statusTyping.textContent = 'READING CLIPBOARD...';
+  setHologramActivity('processing', 'กำลังอ่าน Smart Clipboard', 'ตรวจสิทธิ์และดึงข้อความเข้าสู่ช่องร่างโดยยังไม่ส่งออก', { stage: 'CLIPBOARD', engine: 'SECURE I/O' });
   try {
     const res = await apiFetch('/api/os/clipboard?session_id=' + encodeURIComponent(sessionId));
     const data = await res.json();
     if (data.status === 'success' && data.text) {
       userInput.value = `[บริบทจากคลิปบอร์ด]: ${data.text}\n\n`;
+      updateComposerState();
       userInput.focus();
+      finishHologram(true, 'อ่าน Clipboard สำเร็จ', 'ข้อความถูกใส่ในช่องร่างแล้ว กรุณาตรวจสอบก่อนส่ง');
     } else if (data.status === 'success') {
       enterChatMode();
       addMessage('jarvis', 'คลิปบอร์ดของท่านว่างเปล่าครับ');
+      finishHologram(true, 'Clipboard ว่าง', 'ตรวจสอบสำเร็จแต่ไม่พบข้อความสำหรับนำเข้า');
     } else {
       enterChatMode();
       addMessage('jarvis', data.message || 'ไม่สามารถอ่านคลิปบอร์ดได้ครับ');
+      finishHologram(false, 'อ่าน Clipboard ไม่สำเร็จ', data.message || 'สิทธิ์ระบบไม่พร้อมใช้งาน');
     }
   } catch (err) {
     enterChatMode();
     addMessage('jarvis', 'ไม่สามารถเชื่อมต่อ Backend เพื่ออ่านคลิปบอร์ดได้ครับ');
+    finishHologram(false, 'อ่าน Clipboard ไม่สำเร็จ', 'Backend หรือสิทธิ์ระบบไม่พร้อมใช้งาน');
   }
   statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
 });
@@ -3178,12 +3659,15 @@ async function initJarvis() {
       micBtn.classList.add('active');
       reactorCore.classList.add('listening');
       statusTyping.textContent = 'LISTENING...';
+      setHologramActivity('listening', 'JARVIS กำลังฟัง', 'Visualizing voice input และรอรับคำสั่งภาษาไทย', { stage: 'VOICE INPUT', engine: 'SPEECH CORE' });
     };
 
     recognition.onresult = function(event) {
       const transcript = event.results[0][0].transcript;
       userInput.value = '';
+      updateComposerState();
       clearSilenceTimers(); // the user just responded — the 20s/30s deadline no longer applies
+      setHologramActivity('thinking', 'รับคำสั่งเสียงแล้ว', transcript.slice(0, 120), { stage: 'VOICE ANALYZE', engine: 'SPEECH CORE' });
 
       if (voiceConversationActive && isVoiceEndPhrase(transcript)) {
         // User said something like "พอแล้ว" / "จบการสนทนา" — end the voice session,
@@ -3209,6 +3693,7 @@ async function initJarvis() {
         return;
       }
       // A real problem (mic permission denied, network, ...) — end the session.
+      finishHologram(false, 'ระบบเสียงไม่พร้อม', 'ตรวจสิทธิ์ไมโครโฟนและการรองรับ Speech Recognition');
       endVoiceConversation(null);
     };
 

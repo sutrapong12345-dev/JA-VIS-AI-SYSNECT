@@ -1,4 +1,4 @@
-# J.A.R.V.I.S. v10.1 — SYSNECT AI Agent
+# J.A.R.V.I.S. v10.2 — SYSNECT AI Agent
 
 ผู้ช่วย AI สำหรับงานส่วนตัวและองค์กร รองรับหลายโมเดล, streaming chat,
 ฐานความรู้พร้อม citation, RBAC, reminders, structured tools และ audit log
@@ -6,6 +6,10 @@
 
 หน้าเว็บมีศูนย์ควบคุมบทสนทนา, reconnect, session reset, responsive layout,
 Admin dashboard และ AI Quality Gate สำหรับคัดกรองข้อมูลก่อน fine-tune
+
+v10.2 เพิ่ม JARVIS Holographic Activity Projector แบบ Canvas 3D ที่แสดงงาน
+จริงตาม stage จาก backend, ช่องพิมพ์หลายบรรทัด, Secure Confirmation Modal,
+Request ID และ Provider Circuit Breaker สำหรับ fallback ที่เร็วและตรวจสอบได้
 
 ## เอกสาร
 

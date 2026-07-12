@@ -35,6 +35,49 @@ class SecurityFoundationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("directory", response.json()["knowledge"])
 
+    def test_request_id_is_echoed_and_validation_errors_are_structured(self):
+        request_id = "test_request_123"
+        health = self.client.get("/api/health", headers={"X-Request-ID": request_id})
+        self.assertEqual(health.headers["X-Request-ID"], request_id)
+
+        session_id, token = self.issue_session()
+        invalid = self.client.post(
+            "/api/chat",
+            headers={**self.auth(token), "X-Request-ID": request_id},
+            json={"session_id": session_id},
+        )
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(invalid.json()["code"], "validation_error")
+        self.assertEqual(invalid.json()["request_id"], request_id)
+        self.assertIn("message", invalid.json()["fields"])
+
+    def test_oversized_chat_message_is_rejected_instead_of_truncated(self):
+        session_id, token = self.issue_session()
+        response = self.client.post(
+            "/api/chat",
+            headers=self.auth(token),
+            json={"session_id": session_id, "message": "x" * (main.MAX_MESSAGE_CHARS + 1)},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("ยาวเกิน", response.json()["message"])
+
+    def test_stream_emits_hologram_stage_before_content(self):
+        session_id, token = self.issue_session()
+        original_stream = main.generate_reply_stream
+        try:
+            main.generate_reply_stream = lambda provider, system, history: iter(["ทดสอบสำเร็จ"])
+            response = self.client.post(
+                "/api/chat/stream",
+                headers=self.auth(token),
+                json={"session_id": session_id, "message": "ทดสอบ hologram stage"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('"stage": "thinking"', response.text)
+            self.assertIn('"done": true', response.text)
+            self.assertLess(response.text.index('"stage": "thinking"'), response.text.index('"delta"'))
+        finally:
+            main.generate_reply_stream = original_stream
+
     def test_session_data_requires_a_server_issued_token(self):
         response = self.client.get("/api/chat/history", params={"session_id": "made_up"})
         self.assertEqual(response.status_code, 401)
