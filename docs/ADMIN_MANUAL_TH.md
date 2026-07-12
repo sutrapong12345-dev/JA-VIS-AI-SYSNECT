@@ -196,6 +196,8 @@ venv\Scripts\python.exe -m unittest discover -s tests -v
 - Response มี `X-Request-ID` และ error payload มี `request_id`
 - Provider ที่ติด quota/timeout เข้า cooldown และ fallback ไม่ลองตัวเดิมซ้ำทันที
 - Hologram แสดง stage จาก SSE โดยไม่บล็อกช่องพิมพ์หรือปุ่ม Stop
+- Pipeline ของ Hologram เปลี่ยนตาม stage และ Focus Mode เข้า/ออกได้ด้วยปุ่มหรือ `Esc`
+- Radar, Voice Wave, Document Scan, Tool Core, Success และ Error render ได้โดยไม่เกิด JavaScript error
 
 ### Provider Circuit Breaker
 

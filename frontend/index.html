@@ -561,6 +561,8 @@
     backdrop-filter: blur(7px); pointer-events: none;
     animation: holoMaterialize .28s ease-out;
   }
+  .hologram-activity.focus-mode { position:fixed; inset:68px 18px 48px; z-index:210; pointer-events:auto; }
+  .hologram-activity.focus-mode::after { content:''; position:fixed; inset:0; z-index:-1; background:rgba(0,5,14,.82); backdrop-filter:blur(12px); }
   .hologram-activity[hidden] { display: none; }
   .hologram-activity[data-state="listening"] { --holo-color:#ffb800; --holo-rgb:255,184,0; }
   .hologram-activity[data-state="web_search"] { --holo-color:#ffb800; --holo-rgb:255,184,0; }
@@ -575,9 +577,22 @@
   .holo-corners::before { left:10px; top:10px; border-right:0; border-bottom:0; }
   .holo-corners::after { right:10px; bottom:10px; border-left:0; border-top:0; }
   .holo-header { position:absolute; left:18px; right:18px; top:15px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .holo-header-actions { display:flex; align-items:center; gap:10px; pointer-events:auto; }
   .holo-kicker { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; color:var(--holo-color); }
   .holo-live { display:flex; align-items:center; gap:6px; font-family:'Share Tech Mono',monospace; font-size:9px; color:var(--holo-color); }
   .holo-live::before { content:''; width:6px; height:6px; border-radius:50%; background:var(--holo-color); box-shadow:0 0 10px var(--holo-color); animation:dotPulse 1s infinite; }
+  .holo-focus-btn { width:28px; height:28px; border:1px solid rgba(var(--holo-rgb),.42); background:rgba(2,13,28,.72); color:var(--holo-color); cursor:pointer; transition:.18s ease; }
+  .holo-focus-btn:hover, .holo-focus-btn:focus-visible { background:rgba(var(--holo-rgb),.17); border-color:var(--holo-color); outline:2px solid rgba(var(--holo-rgb),.35); outline-offset:2px; }
+  .holo-state-chip { position:absolute; left:18px; top:48px; display:flex; align-items:center; gap:8px; padding:6px 9px; border:1px solid rgba(var(--holo-rgb),.25); background:rgba(2,13,28,.62); font:9px 'Share Tech Mono',monospace; color:var(--holo-color); letter-spacing:1px; }
+  .holo-state-chip i { width:12px; text-align:center; filter:drop-shadow(0 0 5px var(--holo-color)); }
+  .holo-pipeline { position:absolute; left:50%; top:50px; width:min(330px,44%); transform:translateX(-50%); display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
+  .holo-step { position:relative; padding-top:12px; text-align:center; color:rgba(156,201,220,.48); font:8px 'Share Tech Mono',monospace; letter-spacing:.8px; }
+  .holo-step::before { content:''; position:absolute; left:50%; top:0; width:6px; height:6px; border:1px solid currentColor; border-radius:50%; transform:translateX(-50%); background:#020d1c; }
+  .holo-step:not(:last-child)::after { content:''; position:absolute; left:calc(50% + 5px); right:calc(-50% + 5px); top:3px; height:1px; background:currentColor; opacity:.45; }
+  .holo-step.complete { color:var(--holo-color); }
+  .holo-step.complete::before { background:var(--holo-color); box-shadow:0 0 8px var(--holo-color); }
+  .holo-step.active { color:#fff; text-shadow:0 0 8px var(--holo-color); }
+  .holo-step.active::before { background:#fff; border-color:var(--holo-color); box-shadow:0 0 0 4px rgba(var(--holo-rgb),.18),0 0 12px var(--holo-color); animation:dotPulse 1s infinite; }
   .holo-status-card { position:absolute; left:18px; bottom:18px; width:min(440px,calc(100% - 36px)); padding:12px 14px; border-left:2px solid var(--holo-color); background:linear-gradient(90deg,rgba(2,13,28,.92),rgba(2,13,28,.42)); }
   .holo-title { font-family:'Orbitron',sans-serif; font-size:15px; letter-spacing:2px; color:var(--holo-color); text-shadow:0 0 14px rgba(var(--holo-rgb),.6); }
   .holo-detail { margin-top:5px; color:var(--text); font-size:13px; line-height:1.35; }
@@ -588,10 +603,16 @@
   .holo-telemetry-row { display:flex; justify-content:space-between; gap:8px; padding:5px 7px; border:1px solid rgba(var(--holo-rgb),.18); background:rgba(2,13,28,.58); font-family:'Share Tech Mono',monospace; font-size:8px; }
   .holo-telemetry-row span:first-child { color:var(--text-dim); }
   .holo-telemetry-row span:last-child { color:var(--holo-color); text-align:right; }
+  .holo-progress-meta { display:flex; justify-content:space-between; margin-top:6px; color:var(--text-dim); font:8px 'Share Tech Mono',monospace; letter-spacing:.7px; }
+  .holo-progress-meta span:last-child { color:var(--holo-color); }
   @keyframes holoMaterialize { from{opacity:0;transform:scale(.96);filter:blur(7px)} to{opacity:1;transform:scale(1);filter:blur(0)} }
   @keyframes holoScan { from{transform:translateY(0)} to{transform:translateY(430px)} }
   @keyframes holoFlicker { 0%,100%{opacity:.08} 50%{opacity:.16} }
   @keyframes holoProgress { 0%{transform:translateX(-120%)} 100%{transform:translateX(330%)} }
+  @media (prefers-reduced-motion: reduce) {
+    .hologram-activity, .holo-scanline, .holo-noise, .holo-live::before, .holo-step.active::before, .holo-progress-bar.indeterminate { animation:none !important; }
+    .holo-progress-bar.indeterminate { width:58% !important; }
+  }
   
   /* Arc Reactor */
   .arc-reactor-wrap {
@@ -1299,7 +1320,14 @@
     .toolbar-label { display: none; }
     .toolbar-btn { width: 30px; min-width: 30px; padding: 0; }
     .hologram-activity { inset:48px 4px 58px; }
+    .hologram-activity.focus-mode { inset:58px 6px 42px; }
     .holo-telemetry { display:none; }
+    .holo-header { left:10px; right:10px; top:10px; }
+    .holo-kicker { font-size:7px; letter-spacing:1px; }
+    .holo-live { display:none; }
+    .holo-state-chip { left:10px; top:44px; font-size:7px; }
+    .holo-pipeline { top:78px; width:calc(100% - 28px); }
+    .holo-step { font-size:7px; letter-spacing:0; }
     .holo-title { font-size:11px; letter-spacing:1px; }
     .holo-detail { font-size:11px; }
     .holo-status-card { left:10px; bottom:10px; width:calc(100% - 20px); }
@@ -1462,7 +1490,18 @@
       <div class="holo-corners" aria-hidden="true"></div>
       <div class="holo-header">
         <div class="holo-kicker">J.A.R.V.I.S. · HOLOGRAPHIC PROJECTOR</div>
-        <div class="holo-live" id="holo-live">LIVE PROCESS</div>
+        <div class="holo-header-actions">
+          <div class="holo-live" id="holo-live">LIVE PROCESS</div>
+          <button class="holo-focus-btn" id="holo-focus-btn" type="button" aria-label="ขยาย Hologram เต็มหน้าจอ" aria-pressed="false" title="ขยาย Hologram"><i class="fas fa-expand"></i></button>
+        </div>
+      </div>
+      <div class="holo-state-chip"><i id="holo-state-icon" class="fas fa-brain"></i><span id="holo-state-label">COGNITIVE ANALYSIS</span></div>
+      <div class="holo-pipeline" id="holo-pipeline" aria-label="ขั้นตอนการทำงาน">
+        <div class="holo-step active" data-step="0">INPUT</div>
+        <div class="holo-step" data-step="1">CONTEXT</div>
+        <div class="holo-step" data-step="2">AI CORE</div>
+        <div class="holo-step" data-step="3">ACTION</div>
+        <div class="holo-step" data-step="4">OUTPUT</div>
       </div>
       <div class="holo-telemetry" aria-hidden="true">
         <div class="holo-telemetry-row"><span>STAGE</span><span id="holo-stage">ANALYZE</span></div>
@@ -1474,6 +1513,7 @@
         <div class="holo-title" id="holo-title">กำลังประมวลผลคำสั่ง</div>
         <div class="holo-detail" id="holo-detail">วิเคราะห์บริบทและเตรียมระบบที่เกี่ยวข้อง</div>
         <div class="holo-progress"><div id="holo-progress-bar" class="holo-progress-bar indeterminate"></div></div>
+        <div class="holo-progress-meta"><span id="holo-progress-label">กำลังเตรียมบริบท</span><span id="holo-progress-value">AUTO</span></div>
       </div>
     </div>
     
@@ -1550,7 +1590,7 @@
   <!-- BOTTOM HUD -->
   <footer class="hud-bottom">
     <div>GEO: <span id="geo-coords">13.7563°N 100.5018°E</span></div>
-    <div>J.A.R.V.I.S. <span>v10.2.0</span> · SYSNECT <span>AI AGENT</span></div>
+    <div>J.A.R.V.I.S. <span>v10.3.0</span> · SYSNECT <span>AI AGENT</span></div>
     <div>ENCRYPTION: <span>AES-256</span> · STATUS: <span id="conn-status">SECURE</span></div>
   </footer>
   
@@ -2526,6 +2566,12 @@ const holoStage = document.getElementById('holo-stage');
 const holoEngine = document.getElementById('holo-engine');
 const holoElapsed = document.getElementById('holo-elapsed');
 const holoProgressBar = document.getElementById('holo-progress-bar');
+const holoProgressLabel = document.getElementById('holo-progress-label');
+const holoProgressValue = document.getElementById('holo-progress-value');
+const holoStateIcon = document.getElementById('holo-state-icon');
+const holoStateLabel = document.getElementById('holo-state-label');
+const holoSteps = [...document.querySelectorAll('.holo-step')];
+const holoFocusBtn = document.getElementById('holo-focus-btn');
 let hologramEnabled = localStorage.getItem('jarvis_hologram_enabled') !== 'false';
 let hologramStartedAt = 0;
 let hologramHideTimer = null;
@@ -2537,6 +2583,19 @@ const HOLOGRAM_PALETTE = {
   uploading: [0, 255, 136], listening: [255, 184, 0], success: [0, 255, 136], error: [255, 59, 59]
 };
 
+const HOLOGRAM_MODES = {
+  listening: { icon:'fa-microphone-lines', label:'VOICE ACQUISITION', step:0, progress:'กำลังรับสัญญาณเสียง' },
+  thinking: { icon:'fa-brain', label:'COGNITIVE ANALYSIS', step:1, progress:'กำลังวิเคราะห์บริบท' },
+  processing: { icon:'fa-microchip', label:'NEURAL PROCESSING', step:2, progress:'AI Core กำลังประมวลผล' },
+  searching: { icon:'fa-satellite-dish', label:'NETWORK SEARCH', step:2, progress:'กำลังค้นหาแหล่งข้อมูล' },
+  web_search: { icon:'fa-globe', label:'WEB INTELLIGENCE', step:2, progress:'กำลังค้นหาและตรวจแหล่งอ้างอิง' },
+  data_search: { icon:'fa-database', label:'KNOWLEDGE RETRIEVAL', step:2, progress:'กำลังดึงความรู้ที่ได้รับอนุญาต' },
+  executing: { icon:'fa-gears', label:'SECURE TOOL EXECUTION', step:3, progress:'กำลังเรียกใช้เครื่องมืออย่างปลอดภัย' },
+  uploading: { icon:'fa-file-shield', label:'DOCUMENT SCAN', step:1, progress:'กำลังตรวจและอ่านข้อมูล' },
+  success: { icon:'fa-circle-check', label:'MISSION COMPLETE', step:4, progress:'ส่งมอบผลลัพธ์เรียบร้อย' },
+  error: { icon:'fa-triangle-exclamation', label:'ATTENTION REQUIRED', step:4, progress:'งานหยุดลง กรุณาตรวจรายละเอียด' }
+};
+
 function setHologramActivity(state, title, detail, options = {}) {
   if (!hologramEnabled) return;
   clearTimeout(hologramHideTimer);
@@ -2546,15 +2605,25 @@ function setHologramActivity(state, title, detail, options = {}) {
   hologramEl.hidden = false;
   holoTitle.textContent = title || 'กำลังประมวลผล';
   holoDetail.textContent = detail || 'JARVIS Core กำลังเตรียมระบบที่เกี่ยวข้อง';
+  const mode = HOLOGRAM_MODES[hologramState] || HOLOGRAM_MODES.processing;
+  holoStateIcon.className = `fas ${mode.icon}`;
+  holoStateLabel.textContent = mode.label;
+  holoProgressLabel.textContent = options.progressLabel || mode.progress;
+  holoSteps.forEach((step, index) => {
+    step.classList.toggle('complete', index < mode.step || hologramState === 'success');
+    step.classList.toggle('active', index === mode.step && hologramState !== 'success');
+  });
   holoStage.textContent = String(options.stage || state || 'PROCESS').toUpperCase();
   holoEngine.textContent = String(options.engine || document.getElementById('ai-provider').textContent || 'JARVIS CORE').toUpperCase();
   const progress = Number(options.progress);
   if (Number.isFinite(progress)) {
     holoProgressBar.classList.remove('indeterminate');
     holoProgressBar.style.width = Math.max(0, Math.min(100, progress)) + '%';
+    holoProgressValue.textContent = Math.round(Math.max(0, Math.min(100, progress))) + '%';
   } else {
     holoProgressBar.classList.add('indeterminate');
     holoProgressBar.style.width = '35%';
+    holoProgressValue.textContent = 'AUTO';
   }
 }
 
@@ -2563,13 +2632,29 @@ function finishHologram(success, title, detail, delay = 1800) {
   setHologramActivity(success ? 'success' : 'error', title, detail, {
     stage: success ? 'COMPLETE' : 'ERROR', progress: 100
   });
-  hologramHideTimer = setTimeout(() => { hologramEl.hidden = true; }, delay);
+  hologramHideTimer = setTimeout(hideHologram, delay);
 }
 
 function hideHologram() {
   clearTimeout(hologramHideTimer);
   hologramEl.hidden = true;
+  hologramEl.classList.remove('focus-mode');
+  holoFocusBtn.setAttribute('aria-pressed', 'false');
+  holoFocusBtn.setAttribute('aria-label', 'ขยาย Hologram เต็มหน้าจอ');
+  holoFocusBtn.innerHTML = '<i class="fas fa-expand"></i>';
 }
+
+holoFocusBtn.addEventListener('click', () => {
+  const expanded = hologramEl.classList.toggle('focus-mode');
+  holoFocusBtn.setAttribute('aria-pressed', String(expanded));
+  holoFocusBtn.setAttribute('aria-label', expanded ? 'ย่อ Hologram' : 'ขยาย Hologram เต็มหน้าจอ');
+  holoFocusBtn.title = expanded ? 'ย่อ Hologram' : 'ขยาย Hologram';
+  holoFocusBtn.innerHTML = `<i class="fas ${expanded ? 'fa-compress' : 'fa-expand'}"></i>`;
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && hologramEl.classList.contains('focus-mode')) holoFocusBtn.click();
+});
 
 document.getElementById('hologram-btn').addEventListener('click', (event) => {
   hologramEnabled = !hologramEnabled;
@@ -2674,6 +2759,58 @@ document.getElementById('hologram-btn').setAttribute('aria-pressed', String(holo
       ctx.fillStyle = color(.85); ctx.beginPath(); ctx.arc(nx, ny, 2 + (i % 2), 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = color(.18); ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(nx,ny); ctx.stroke();
     }
+
+    // Each task family receives its own readable cinematic projection.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.lineCap = 'round';
+    if (['searching','web_search','data_search'].includes(hologramState)) {
+      const sweep = t * 1.8;
+      ctx.strokeStyle = color(.28); ctx.lineWidth = 1;
+      for (let r = .38; r <= 1; r += .2) { ctx.beginPath(); ctx.arc(0,0,radius*r,0,Math.PI*2); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(sweep)*radius,Math.sin(sweep)*radius); ctx.strokeStyle=color(.92); ctx.lineWidth=2; ctx.stroke();
+      const cone = ctx.createRadialGradient(0,0,2,0,0,radius);
+      cone.addColorStop(0,color(.22)); cone.addColorStop(1,color(0));
+      ctx.fillStyle=cone; ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,radius,sweep-.32,sweep); ctx.closePath(); ctx.fill();
+      [[.42,.18],[-.56,-.31],[.18,-.63]].forEach(([x,y],i) => {
+        const blink=.45+Math.sin(t*4+i)*.4; ctx.fillStyle=color(blink); ctx.beginPath(); ctx.arc(x*radius,y*radius,3,0,Math.PI*2); ctx.fill();
+      });
+    } else if (hologramState === 'listening') {
+      ctx.strokeStyle=color(.8); ctx.lineWidth=2;
+      ctx.beginPath();
+      for (let x=-radius; x<=radius; x+=4) {
+        const envelope=1-Math.abs(x/radius); const y=Math.sin(x*.09-t*8)*radius*.28*envelope*(.65+Math.sin(t*2)*.2);
+        x===-radius ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      for(let i=0;i<3;i++){ ctx.strokeStyle=color(.22-i*.04); ctx.beginPath(); ctx.arc(0,0,radius*(.44+i*.22)+Math.sin(t*3+i)*5,-.72,.72); ctx.stroke(); }
+    } else if (hologramState === 'uploading') {
+      const dw=radius*1.08, dh=radius*1.3;
+      ctx.strokeStyle=color(.68); ctx.lineWidth=1.3; ctx.strokeRect(-dw/2,-dh/2,dw,dh);
+      ctx.beginPath(); ctx.moveTo(dw*.15,-dh/2); ctx.lineTo(dw/2,-dh*.22); ctx.lineTo(dw*.15,-dh*.22); ctx.closePath(); ctx.stroke();
+      for(let i=0;i<5;i++){ const y=-dh*.12+i*dh*.14; ctx.strokeStyle=color(.22+i*.05); ctx.beginPath(); ctx.moveTo(-dw*.34,y); ctx.lineTo(dw*(i===4?.12:.34),y); ctx.stroke(); }
+      const scanY=-dh/2+((t*.48)%1)*dh; ctx.strokeStyle=color(.95); ctx.shadowBlur=12; ctx.shadowColor=color(.8); ctx.beginPath(); ctx.moveTo(-dw*.58,scanY); ctx.lineTo(dw*.58,scanY); ctx.stroke(); ctx.shadowBlur=0;
+    } else if (hologramState === 'executing') {
+      ctx.strokeStyle=color(.82); ctx.lineWidth=1.4;
+      for(let layer=0;layer<3;layer++){
+        const rr=radius*(.38+layer*.25), rot=t*(layer%2?-.7:.55);
+        ctx.beginPath();
+        for(let i=0;i<=6;i++){ const a=rot+i*Math.PI/3; const x=Math.cos(a)*rr,y=Math.sin(a)*rr; i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+        ctx.stroke();
+      }
+      for(let i=0;i<6;i++){ const a=t+i*Math.PI/3; const x=Math.cos(a)*radius*.72,y=Math.sin(a)*radius*.72; ctx.fillStyle=color(.85); ctx.fillRect(x-2,y-2,4,4); }
+    } else if (hologramState === 'success') {
+      const reveal=Math.min(1,(now-hologramStartedAt)/550);
+      ctx.strokeStyle=color(.98); ctx.lineWidth=radius*.065; ctx.shadowBlur=18; ctx.shadowColor=color(.9);
+      ctx.beginPath(); ctx.arc(0,0,radius*.62,-Math.PI/2,-Math.PI/2+Math.PI*2*reveal); ctx.stroke();
+      if(reveal>.45){ ctx.beginPath(); ctx.moveTo(-radius*.3,0); ctx.lineTo(-radius*.07,radius*.25); ctx.lineTo(radius*.34,-radius*.27); ctx.stroke(); }
+      ctx.shadowBlur=0;
+    } else if (hologramState === 'error') {
+      const rr=radius*.72*(1+Math.sin(t*5)*.025);
+      ctx.strokeStyle=color(.9); ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,-rr); ctx.lineTo(rr*.87,rr*.55); ctx.lineTo(-rr*.87,rr*.55); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle=color(.9); ctx.fillRect(-2,-rr*.42,4,rr*.57); ctx.beginPath(); ctx.arc(0,rr*.31,3,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
     holoElapsed.textContent = ((now - hologramStartedAt) / 1000).toFixed(1) + 's';
   }
   requestAnimationFrame(frame);
