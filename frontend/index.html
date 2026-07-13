@@ -2452,9 +2452,14 @@ let jarvisVoice = null;
 function pickThaiVoice() {
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
-  return voices.find(v => v.lang === 'th-TH' && /google|natural|neural/i.test(v.name))
-      || voices.find(v => v.lang === 'th-TH')
-      || voices.find(v => v.lang && v.lang.toLowerCase().startsWith('th'))
+  const thai = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('th'));
+  // Prefer an on-device Thai voice. Remote Google/Neural voices can pause while
+  // downloading audio when the connection fluctuates, which sounds stuttery.
+  return thai.find(v => v.lang.toLowerCase() === 'th-th' && v.localService)
+      || thai.find(v => v.localService)
+      || thai.find(v => v.lang.toLowerCase() === 'th-th' && /natural|neural/i.test(v.name))
+      || thai.find(v => v.lang.toLowerCase() === 'th-th')
+      || thai[0]
       || null;
 }
 if ('speechSynthesis' in window) {
@@ -2473,20 +2478,109 @@ function stripForSpeech(text) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+// Chromium speech engines are prone to long mid-utterance pauses. Keep each
+// utterance short while preserving Thai word boundaries via Intl.Segmenter.
+function splitSpeechChunks(text, maxChars = 120) {
+  const sentences = text.match(/[^.!?。！？]+[.!?。！？]*/gu) || [text];
+  const units = [];
+  const segmenter = ('Segmenter' in Intl)
+    ? new Intl.Segmenter('th', { granularity: 'word' })
+    : null;
+
+  for (const rawSentence of sentences) {
+    const sentence = rawSentence.trim();
+    if (!sentence) continue;
+    if (sentence.length <= maxChars) {
+      units.push(sentence);
+      continue;
+    }
+
+    const words = segmenter
+      ? Array.from(segmenter.segment(sentence), item => item.segment)
+      : sentence.split(/(\s+)/).filter(Boolean);
+    let chunk = '';
+    for (const word of words) {
+      if (chunk && chunk.length + word.length > maxChars) {
+        units.push(chunk.trim());
+        chunk = '';
+      }
+      chunk += word;
+    }
+    if (chunk.trim()) units.push(chunk.trim());
+  }
+
+  // Join tiny adjacent sentences so punctuation does not create robotic gaps.
+  const chunks = [];
+  for (const unit of units) {
+    const last = chunks[chunks.length - 1];
+    if (last && last.length < 45 && last.length + unit.length + 1 <= maxChars) {
+      chunks[chunks.length - 1] = `${last} ${unit}`;
+    } else {
+      chunks.push(unit);
+    }
+  }
+  return chunks;
+}
+
+let speechRunId = 0;
+let activeSpeechUtterance = null;
+
+function cancelJarvisSpeech() {
+  speechRunId++;
+  activeSpeechUtterance = null;
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  simulateJarvisSpeak(false);
+}
+
 function speakText(text, onEnd) {
   if (!('speechSynthesis' in window)) { if (onEnd) onEnd(); return; }
   const clean = stripForSpeech(text);
   if (!clean) { if (onEnd) onEnd(); return; }
-  window.speechSynthesis.cancel(); // stop any previous utterance
-  const u = new SpeechSynthesisUtterance(clean);
-  u.lang = 'th-TH';
-  u.rate = 1.05;
-  u.pitch = 1.0;
-  u.volume = 1.0;
-  if (jarvisVoice) u.voice = jarvisVoice;
-  u.onstart = () => simulateJarvisSpeak(true);
-  u.onend = () => { simulateJarvisSpeak(false); if (onEnd) onEnd(); };
-  window.speechSynthesis.speak(u);
+  cancelJarvisSpeech(); // one owner: a new reply intentionally replaces the old one
+  const runId = speechRunId;
+  const chunks = splitSpeechChunks(clean);
+  let index = 0;
+
+  const finish = () => {
+    if (runId !== speechRunId) return;
+    activeSpeechUtterance = null;
+    simulateJarvisSpeak(false);
+    if (onEnd) onEnd();
+  };
+
+  const playNext = () => {
+    if (runId !== speechRunId) return;
+    if (index >= chunks.length) { finish(); return; }
+
+    const u = new SpeechSynthesisUtterance(chunks[index++]);
+    activeSpeechUtterance = u; // keep a reference; some engines otherwise lose callbacks
+    u.lang = 'th-TH';
+    u.rate = 1.0;
+    u.pitch = 0.98;
+    u.volume = 1.0;
+    if (jarvisVoice) u.voice = jarvisVoice;
+
+    let settled = false;
+    const advance = () => {
+      if (settled || runId !== speechRunId) return;
+      settled = true;
+      activeSpeechUtterance = null;
+      // A very short hand-off lets the native voice engine release its buffer
+      // without creating an audible sentence-sized pause.
+      setTimeout(playNext, 20);
+    };
+    u.onstart = () => { if (runId === speechRunId) simulateJarvisSpeak(true); };
+    u.onend = advance;
+    u.onerror = event => {
+      if (event.error === 'canceled' || event.error === 'interrupted') return;
+      console.warn('Speech synthesis chunk failed:', event.error);
+      advance();
+    };
+    window.speechSynthesis.speak(u);
+  };
+
+  playNext();
 }
 
 // ===== Voice conversation mode (hands-free mic <-> JARVIS loop) =====
@@ -2535,7 +2629,7 @@ function endVoiceConversation(farewell) {
   voiceConversationActive = false;
   voiceSoftStopped = false;
   clearSilenceTimers();
-  window.speechSynthesis.cancel();
+  cancelJarvisSpeech();
   try { recognition.stop(); } catch (e) {}
   statusTyping.textContent = 'SYSTEM READY · AWAITING COMMAND';
   if (farewell) {
@@ -2992,7 +3086,7 @@ async function processInput(input, options = {}) {
   // the messages still land in the (smaller) chat-log below the reactor.
   if (!viaVoice) enterChatMode();
   // If JARVIS is still talking from the previous turn, let the new question interrupt it.
-  window.speechSynthesis.cancel();
+  cancelJarvisSpeech();
   clearSilenceTimers(); // the user just spoke/typed, so any pending 20s/30s deadline is moot
 
   // After JARVIS finishes speaking, resume listening automatically — but only
@@ -3094,7 +3188,7 @@ async function processInput(input, options = {}) {
       // User pressed Stop — freeze whatever text already arrived, don't retry
       // or fall back (that would just start a fresh answer right after stopping one).
       // Resetting isProcessing/the button icon is handled by the finally block below.
-      window.speechSynthesis.cancel();
+      cancelJarvisSpeech();
       el.innerHTML = (acc ? renderMarkdown(acc) : '<span class="text-dim">(ไม่มีข้อความ — หยุดก่อนที่ AI จะเริ่มตอบ)</span>') +
         ' <span class="stopped-tag">[หยุดแล้ว]</span>';
       scrollChat(false);
